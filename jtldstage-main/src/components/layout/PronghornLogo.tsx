@@ -1,4 +1,4 @@
-import jtldstageLogo from "@/assets/pronghorn-logo.jpeg";
+import jtldstageLogo from "@/assets/JTLDStage-logo.jpg";
 import { cn } from "@/lib/utils";
 
 export function JTLDstageLogo({ className = "h-8 w-8" }: { className?: string }) {
