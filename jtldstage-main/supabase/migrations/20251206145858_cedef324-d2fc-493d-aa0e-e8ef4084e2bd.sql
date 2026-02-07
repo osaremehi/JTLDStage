@@ -1,0 +1,2 @@
+-- Drop the legacy overload with p_status text (not project_status enum)
+DROP FUNCTION IF EXISTS public.update_project_with_token(uuid, uuid, text, text, text, numeric, text, text, text, date, date, text[]);

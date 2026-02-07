@@ -1,0 +1,434 @@
+import { useState, useEffect } from "react";
+import { ChevronRight, ChevronDown, Plus, Trash2, Edit2, FileText, ListTodo, CheckSquare, FileCheck, Sparkles, Link as LinkIcon, Loader2, Paperclip, StickyNote, ChevronUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
+import { RequirementStandardsBadges } from "./RequirementStandardsBadges";
+import { SourceRequirementsUpload } from "./SourceRequirementsUpload";
+import { useRequirementFiles } from "@/hooks/useRequirementFiles";
+
+export type RequirementType = "EPIC" | "FEATURE" | "STORY" | "ACCEPTANCE_CRITERIA";
+export type RequirementStatus = "pending" | "in_progress" | "under_review" | "partially_completed" | "completed" | "cancelled";
+
+export interface Requirement {
+  id: string;
+  code?: string;
+  type: RequirementType;
+  title: string;
+  content?: string;
+  status?: RequirementStatus | null;
+  notes?: string | null;
+  children?: Requirement[];
+  parentId?: string;
+}
+
+interface RequirementsTreeProps {
+  requirements: Requirement[];
+  projectId: string;
+  shareToken?: string | null;
+  expandAll?: boolean;
+  onNodeUpdate?: (id: string, updates: Partial<Requirement>) => void;
+  onNodeDelete?: (id: string) => void;
+  onNodeAdd?: (parentId: string | null, type: RequirementType) => void;
+  onExpand?: () => void;
+  onLinkStandard?: (id: string, title: string) => void;
+}
+
+const typeIcons = { EPIC: FileText, FEATURE: ListTodo, STORY: CheckSquare, ACCEPTANCE_CRITERIA: FileCheck };
+const typeColors = {
+  EPIC: "bg-purple-500/10 text-purple-700 border-purple-500/20",
+  FEATURE: "bg-blue-500/10 text-blue-700 border-blue-500/20",
+  STORY: "bg-green-500/10 text-green-700 border-green-500/20",
+  ACCEPTANCE_CRITERIA: "bg-orange-500/10 text-orange-700 border-orange-500/20",
+};
+
+const statusColors: Record<string, string> = {
+  pending: "bg-gray-500/10 text-gray-700 border-gray-500/20 dark:text-gray-300",
+  in_progress: "bg-blue-500/10 text-blue-700 border-blue-500/20 dark:text-blue-300",
+  under_review: "bg-yellow-500/10 text-yellow-700 border-yellow-500/20 dark:text-yellow-300",
+  partially_completed: "bg-orange-500/10 text-orange-700 border-orange-500/20 dark:text-orange-300",
+  completed: "bg-green-500/10 text-green-700 border-green-500/20 dark:text-green-300",
+  cancelled: "bg-red-500/10 text-red-700 border-red-500/20 dark:text-red-300",
+};
+
+const statusLabels: Record<string, string> = {
+  pending: "Pending",
+  in_progress: "In Progress",
+  under_review: "Under Review",
+  partially_completed: "Partial",
+  completed: "Completed",
+  cancelled: "Cancelled",
+};
+
+function getNextType(type: RequirementType): RequirementType | null {
+  const map = { EPIC: "FEATURE", FEATURE: "STORY", STORY: "ACCEPTANCE_CRITERIA" };
+  return (map[type] as RequirementType) || null;
+}
+
+function RequirementNode({ requirement, level = 0, projectId, shareToken, expandAll, onUpdate, onDelete, onAdd, onExpand, onLinkStandard }: any) {
+  const [isExpanded, setIsExpanded] = useState(level < 2);
+
+  useEffect(() => {
+    if (expandAll !== undefined) {
+      setIsExpanded(expandAll);
+    }
+  }, [expandAll]);
+  const [isEditing, setIsEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(requirement.title);
+  const [editContent, setEditContent] = useState(requirement.content || "");
+  const [editStatus, setEditStatus] = useState(requirement.status || "pending");
+  const [editNotes, setEditNotes] = useState(requirement.notes || "");
+  const [showNotes, setShowNotes] = useState(false);
+  const [isExpanding, setIsExpanding] = useState(false);
+  const { fileCount, refresh: refreshFiles } = useRequirementFiles(requirement.id);
+  const [openFileModal, setOpenFileModal] = useState(false);
+  const Icon = typeIcons[requirement.type];
+  const hasChildren = requirement.children?.length > 0;
+  const currentStatus = requirement.status || "pending";
+
+  const handleAIExpand = async () => {
+    if (requirement.type === "ACCEPTANCE_CRITERIA") return toast.error("Cannot expand further");
+    setIsExpanding(true);
+    try {
+      const { data, error } = await supabase.functions.invoke("expand-requirement", { 
+        body: { 
+          requirementId: requirement.id,
+          projectId,
+          shareToken 
+        } 
+      });
+      if (error) throw error;
+      toast.success(`Added ${data.count} sub-requirements`);
+      onExpand?.();
+    } catch (error: any) {
+      toast.error(error.message || "Expansion failed");
+    } finally {
+      setIsExpanding(false);
+    }
+  };
+
+  const handleAddChild = () => {
+    const nextType = getNextType(requirement.type);
+    if (nextType && onAdd) {
+      console.log("Adding child:", requirement.id, nextType);
+      onAdd(requirement.id, nextType);
+    }
+  };
+
+  return (
+    <div className="select-none">
+      {isEditing ? (
+        <div className="p-3 md:p-4 bg-muted/30 rounded-md space-y-3 border" style={{ marginLeft: `${level * 20}px` }}>
+          <div className="flex flex-wrap gap-2">
+            {requirement.code && (
+              <Badge variant="outline" className="font-mono text-xs">
+                {requirement.code}
+              </Badge>
+            )}
+            <Badge variant="outline" className={typeColors[requirement.type]}>
+              {requirement.type.replace("_", " ")}
+            </Badge>
+          </div>
+          <Input 
+            value={editTitle} 
+            onChange={(e) => setEditTitle(e.target.value)} 
+            placeholder="Title"
+            autoFocus 
+            className="text-sm md:text-base"
+          />
+          <Textarea 
+            value={editContent} 
+            onChange={(e) => setEditContent(e.target.value)} 
+            rows={3} 
+            placeholder="Description/content"
+            className="text-sm md:text-base"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="text-xs text-muted-foreground">Status:</label>
+            <Select value={editStatus} onValueChange={setEditStatus}>
+              <SelectTrigger className="h-8 w-40 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="pending">Pending</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
+                <SelectItem value="under_review">Under Review</SelectItem>
+                <SelectItem value="partially_completed">Partially Completed</SelectItem>
+                <SelectItem value="completed">Completed</SelectItem>
+                <SelectItem value="cancelled">Cancelled</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <Textarea 
+            value={editNotes} 
+            onChange={(e) => setEditNotes(e.target.value)} 
+            rows={2} 
+            placeholder="Notes (progress, blockers, decisions...)"
+            className="text-sm md:text-base"
+          />
+          <div className="flex flex-wrap gap-2">
+            <Button 
+               size="sm" 
+               className="flex-1 min-w-[80px]"
+               onClick={async () => { 
+                 try {
+                   await onUpdate?.(requirement.id, { 
+                     title: editTitle, 
+                     content: editContent,
+                     status: editStatus,
+                     notes: editNotes
+                   });
+                   toast.success("Changes saved");
+                   setIsEditing(false);
+                 } catch (error) {
+                   console.error("Failed to save requirement", error);
+                   toast.error("Failed to save changes");
+                 }
+               }}
+             >
+               Save
+             </Button>
+            <Button 
+              size="sm" 
+              variant="outline" 
+              className="flex-1 min-w-[80px]"
+              onClick={() => setIsEditing(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="group py-2 px-2 rounded-md hover:bg-muted/50" style={{ paddingLeft: `${level * 20 + 8}px` }}>
+          <div className="flex items-start gap-2">
+            {/* Expand button and icon */}
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {hasChildren ? (
+                <Button 
+                  variant="ghost" 
+                  size="icon" 
+                  className="h-6 w-6 p-0 flex-shrink-0" 
+                  onClick={() => setIsExpanded(!isExpanded)}
+                >
+                  {isExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                </Button>
+              ) : (
+                <div className="h-6 w-6 flex-shrink-0" />
+              )}
+              <div className={`p-1 rounded flex-shrink-0 ${typeColors[requirement.type]}`}>
+                <Icon className="h-3 w-3" />
+              </div>
+            </div>
+            
+            {/* Content area */}
+            <div className="flex-1 min-w-0">
+              {/* Title - most prominent */}
+              <div className="text-sm font-semibold break-words mb-1">{requirement.title}</div>
+              
+              {/* Content - subtitle */}
+              {requirement.content && (
+                <p className="text-xs text-muted-foreground mb-2 break-words">{requirement.content}</p>
+              )}
+              
+              {/* Badges, status, file count, and action buttons in one row */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {requirement.code && (
+                  <Badge variant="outline" className="font-mono text-xs font-semibold flex-shrink-0">
+                    {requirement.code}
+                  </Badge>
+                )}
+                
+                {/* Status badge with inline select */}
+                <Select 
+                  value={currentStatus} 
+                  onValueChange={async (val) => {
+                    try {
+                      await onUpdate?.(requirement.id, { 
+                        title: requirement.title, 
+                        content: requirement.content,
+                        status: val,
+                        notes: requirement.notes
+                      });
+                    } catch (error) {
+                      toast.error("Failed to update status");
+                    }
+                  }}
+                >
+                  <SelectTrigger className={`h-6 w-28 text-xs border ${statusColors[currentStatus] || statusColors.pending}`}>
+                    <SelectValue>{statusLabels[currentStatus] || "Pending"}</SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="in_progress">In Progress</SelectItem>
+                    <SelectItem value="under_review">Under Review</SelectItem>
+                    <SelectItem value="partially_completed">Partial</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+                
+                <RequirementStandardsBadges requirementId={requirement.id} shareToken={shareToken} />
+                
+                {fileCount > 0 && (
+                  <Badge 
+                    variant="secondary" 
+                    className="text-xs gap-1 cursor-pointer hover:bg-secondary/80 flex-shrink-0"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setOpenFileModal(true);
+                    }}
+                  >
+                    <Paperclip className="h-3 w-3" />
+                    {fileCount} {fileCount === 1 ? "file" : "files"}
+                  </Badge>
+                )}
+                
+                {/* Notes toggle button */}
+                {requirement.notes && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-6 w-6 flex-shrink-0"
+                        onClick={() => setShowNotes(!showNotes)}
+                      >
+                        <StickyNote className="h-3.5 w-3.5 text-yellow-600" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Toggle notes</TooltipContent>
+                  </Tooltip>
+                )}
+                
+                {/* Action buttons inline */}
+                <TooltipProvider>
+                  <div className="flex items-center gap-1 ml-auto">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-7 w-7 flex-shrink-0" 
+                      onClick={() => setIsEditing(true)}
+                    >
+                      <Edit2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Edit requirement</TooltipContent>
+                </Tooltip>
+                
+                <SourceRequirementsUpload 
+                  requirementId={requirement.id} 
+                  requirementTitle={requirement.title} 
+                  onUploadComplete={refreshFiles}
+                  open={openFileModal}
+                  onOpenChange={setOpenFileModal}
+                />
+                
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-7 w-7 flex-shrink-0" 
+                      onClick={handleAIExpand} 
+                      disabled={isExpanding}
+                    >
+                      {isExpanding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>AI expand</TooltipContent>
+                </Tooltip>
+                
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-7 w-7 flex-shrink-0" 
+                      onClick={() => onLinkStandard?.(requirement.id, requirement.title)}
+                    >
+                      <LinkIcon className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Link standards</TooltipContent>
+                </Tooltip>
+                
+                {getNextType(requirement.type) && (
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Button 
+                        variant="ghost" 
+                        size="icon" 
+                        className="h-7 w-7 flex-shrink-0" 
+                        onClick={handleAddChild}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </Button>
+                    </TooltipTrigger>
+                    <TooltipContent>Add child requirement</TooltipContent>
+                  </Tooltip>
+                )}
+                
+                 <Tooltip>
+                   <TooltipTrigger asChild>
+                     <Button 
+                       variant="ghost" 
+                       size="icon" 
+                       className="h-7 w-7 flex-shrink-0 text-destructive hover:bg-destructive/10" 
+                       onClick={() => onDelete?.(requirement.id)}
+                     >
+                       <Trash2 className="h-3.5 w-3.5" />
+                     </Button>
+                   </TooltipTrigger>
+                   <TooltipContent>Delete requirement</TooltipContent>
+                 </Tooltip>
+                   </div>
+                 </TooltipProvider>
+               </div>
+               
+               {/* Notes display */}
+               {showNotes && requirement.notes && (
+                 <div className="mt-2 p-2 bg-yellow-50 dark:bg-yellow-900/20 rounded-md border border-yellow-200 dark:border-yellow-800">
+                   <div className="flex items-center gap-1 mb-1">
+                     <StickyNote className="h-3 w-3 text-yellow-600" />
+                     <span className="text-xs font-medium text-yellow-700 dark:text-yellow-400">Notes</span>
+                   </div>
+                   <p className="text-xs text-yellow-800 dark:text-yellow-300 whitespace-pre-wrap">{requirement.notes}</p>
+                 </div>
+               )}
+             </div>
+           </div>
+         </div>
+      )}
+      {isExpanded && hasChildren && <div>{requirement.children!.map((child: any) => <RequirementNode key={child.id} requirement={child} level={level + 1} projectId={projectId} shareToken={shareToken} expandAll={expandAll} onUpdate={onUpdate} onDelete={onDelete} onAdd={onAdd} onExpand={onExpand} onLinkStandard={onLinkStandard} />)}</div>}
+    </div>
+  );
+}
+
+export function RequirementsTree(props: RequirementsTreeProps) {
+  return (
+    <div className="space-y-1">
+      {props.requirements.map((req) => (
+        <RequirementNode 
+          key={req.id} 
+          requirement={req} 
+          level={0}
+          projectId={props.projectId}
+          shareToken={props.shareToken}
+          expandAll={props.expandAll}
+          onUpdate={props.onNodeUpdate}
+          onDelete={props.onNodeDelete}
+          onAdd={props.onNodeAdd}
+          onExpand={props.onExpand}
+          onLinkStandard={props.onLinkStandard}
+        />
+      ))}
+    </div>
+  );
+}

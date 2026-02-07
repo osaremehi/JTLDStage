@@ -1,0 +1,178 @@
+project_id = "obkzdksfayygnrzdqoam"
+
+[functions.clone-project]
+verify_jwt = false
+
+[functions.decompose-requirements]
+verify_jwt = false
+
+[functions.expand-requirement]
+verify_jwt = false
+
+[functions.verify-admin]
+verify_jwt = false
+
+[functions.expand-standards]
+verify_jwt = false
+
+[functions.generate-specification]
+verify_jwt = false
+
+[functions.ai-create-standards]
+verify_jwt = false
+
+[functions.create-project]
+verify_jwt = false
+
+[functions.ai-architect]
+verify_jwt = false
+
+[functions.ai-architect-critic]
+verify_jwt = false
+
+[functions.chat-stream-gemini]
+verify_jwt = false
+
+[functions.chat-stream-anthropic]
+verify_jwt = false
+
+[functions.chat-stream-xai]
+verify_jwt = false
+
+[functions.summarize-artifact]
+verify_jwt = false
+
+[functions.summarize-chat]
+verify_jwt = false
+
+[functions.generate-image]
+verify_jwt = false
+
+[functions.upload-artifact-image]
+verify_jwt = false
+
+[functions.orchestrate-agents]
+verify_jwt = false
+
+[functions.sync-repo-push]
+verify_jwt = false
+
+[functions.sync-repo-pull]
+verify_jwt = false
+
+[functions.create-empty-repo]
+verify_jwt = false
+
+[functions.create-repo-from-template]
+verify_jwt = false
+
+[functions.link-existing-repo]
+verify_jwt = false
+
+[functions.clone-public-repo]
+verify_jwt = false
+
+[functions.coding-agent-orchestrator]
+verify_jwt = false
+
+[functions.database-agent-orchestrator]
+verify_jwt = false
+
+[functions.render-service]
+verify_jwt = false
+
+[functions.generate-local-package]
+verify_jwt = false
+
+[functions.render-database]
+verify_jwt = false
+
+[functions.manage-database]
+verify_jwt = false
+
+[functions.report-local-issue]
+verify_jwt = false
+
+[functions.staging-operations]
+verify_jwt = false
+
+[functions.project-activity]
+verify_jwt = false
+
+[functions.database-agent-import]
+verify_jwt = false
+
+[functions.admin-management]
+verify_jwt = false
+
+[functions.ingest-artifacts]
+verify_jwt = false
+
+[functions.deployment-secrets]
+verify_jwt = false
+
+[functions.send-auth-email]
+verify_jwt = false
+
+[functions.collaboration-agent-orchestrator]
+verify_jwt = false
+
+[functions.database-connection-secrets]
+verify_jwt = false
+
+[functions.visual-recognition]
+verify_jwt = false
+
+[functions.enhance-image]
+verify_jwt = false
+
+[functions.delete-project]
+verify_jwt = false
+
+[functions.log-activity]
+verify_jwt = false
+
+[functions.superadmin-render-management]
+verify_jwt = false
+
+[functions.superadmin-github-management]
+verify_jwt = false
+
+[functions.audit-orchestrator]
+verify_jwt = false
+
+[functions.audit-extract-concepts]
+verify_jwt = false
+
+[functions.audit-merge-concepts]
+verify_jwt = false
+
+[functions.audit-build-tesseract]
+verify_jwt = false
+
+[functions.audit-generate-venn]
+verify_jwt = false
+
+[functions.audit-enhanced-sort]
+verify_jwt = false
+
+[functions.audit-merge-concepts-v2]
+verify_jwt = false
+
+[functions.presentation-agent]
+verify_jwt = false
+
+[functions.recast-slide-layout]
+verify_jwt = false
+
+[functions.validate-signup-code]
+verify_jwt = false
+
+[functions.update-signup-validated]
+verify_jwt = false
+
+[functions.sync-large-file]
+verify_jwt = false
+
+[functions.serve-artifact]
+verify_jwt = false

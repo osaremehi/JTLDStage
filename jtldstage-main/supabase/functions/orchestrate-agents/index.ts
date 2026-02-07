@@ -1,0 +1,1434 @@
+import "https://deno.land/x/xhr@0.1.0/mod.ts";
+import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.81.1';
+
+const corsHeaders = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+};
+
+interface AgentNode {
+  id: string;
+  data: {
+    type: string;
+    label: string;
+    systemPrompt: string;
+    capabilities: string[];
+  };
+}
+
+interface ChangeMetric {
+  iteration: number;
+  agentId: string;
+  agentLabel: string;
+  nodesAdded: number;
+  nodesEdited: number;
+  nodesDeleted: number;
+  edgesAdded: number;
+  edgesEdited: number;
+  edgesDeleted: number;
+  timestamp: string;
+}
+
+interface ChangeLogEntry {
+  iteration: number;
+  agentId: string;
+  agentLabel: string;
+  timestamp: string;
+  changes: string;
+  reasoning: string;
+}
+
+interface CanvasNodeType {
+  id: string;
+  system_name: string;
+  display_label: string;
+  description: string;
+  category: string;
+  icon: string;
+  color_class: string;
+  order_score: number;
+  is_active: boolean;
+  is_legacy: boolean;
+}
+
+// Dynamic helper functions for node types
+function buildFlowOrder(nodeTypes: CanvasNodeType[]): Record<string, number> {
+  const result: Record<string, number> = {};
+  nodeTypes.forEach(nt => {
+    // Convert order_score (100-1100) to flow rank (1-11)
+    result[nt.system_name] = Math.floor(nt.order_score / 100);
+  });
+  return result;
+}
+
+function buildXPositions(nodeTypes: CanvasNodeType[]): Record<string, number> {
+  const result: Record<string, number> = {};
+  nodeTypes.forEach(nt => {
+    // Map order_score to X position with spacing
+    result[nt.system_name] = nt.order_score + Math.floor(nt.order_score * 0.5);
+  });
+  return result;
+}
+
+function buildAllowedTypes(nodeTypes: CanvasNodeType[]): string[] {
+  return nodeTypes
+    .filter(nt => nt.is_active)
+    .map(nt => nt.system_name);
+}
+
+function buildNodeTypeDescriptions(nodeTypes: CanvasNodeType[]): string {
+  return nodeTypes
+    .filter(nt => !nt.is_legacy && nt.is_active)
+    .map(nt => `- ${nt.system_name}: ${nt.description || nt.display_label}`)
+    .join('\n');
+}
+
+function buildFlowHierarchy(nodeTypes: CanvasNodeType[]): string {
+  const groups = new Map<number, string[]>();
+  nodeTypes.filter(nt => nt.is_active && !nt.is_legacy).forEach(nt => {
+    const rank = Math.floor(nt.order_score / 100);
+    if (!groups.has(rank)) groups.set(rank, []);
+    groups.get(rank)!.push(nt.system_name);
+  });
+  return Array.from(groups.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(([rank, types]) => `Level ${rank}: ${types.join(', ')}`)
+    .join('\n');
+}
+
+// Robust JSON parsing with multiple fallback methods
+function parseAIResponse(content: string): any {
+  // Method 1: Try extracting from markdown code blocks
+  const jsonMatch = content.match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
+  if (jsonMatch) {
+    try {
+      return JSON.parse(jsonMatch[1]);
+    } catch (e) {
+      console.log('Failed to parse from markdown block, trying other methods...');
+    }
+  }
+
+  // Method 2: Try direct JSON parse
+  try {
+    return JSON.parse(content);
+  } catch (e) {
+    console.log('Direct parse failed, trying to extract JSON...');
+  }
+
+  // Method 3: Find last complete JSON block
+  const allMatches = content.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g);
+  if (allMatches && allMatches.length > 0) {
+    for (let i = allMatches.length - 1; i >= 0; i--) {
+      const match = allMatches[i].match(/```(?:json)?\s*(\{[\s\S]*\})\s*```/);
+      if (match) {
+        try {
+          return JSON.parse(match[1]);
+        } catch (e) {
+          continue;
+        }
+      }
+    }
+  }
+
+  // Method 4: Extract JSON by finding balanced braces
+  let braceCount = 0;
+  let startIndex = -1;
+  for (let i = 0; i < content.length; i++) {
+    if (content[i] === '{') {
+      if (braceCount === 0) startIndex = i;
+      braceCount++;
+    } else if (content[i] === '}') {
+      braceCount--;
+      if (braceCount === 0 && startIndex !== -1) {
+        try {
+          const extracted = content.substring(startIndex, i + 1);
+          return JSON.parse(extracted);
+        } catch (e) {
+          startIndex = -1;
+        }
+      }
+    }
+  }
+
+  // Method 5: Look for specific JSON patterns
+  const patterns = [
+    /\{[^{}]*"reasoning"[^{}]*\}/s,
+    /\{[^{}]*"nodesToAdd"[^{}]*\}/s,
+  ];
+  for (const pattern of patterns) {
+    const match = content.match(pattern);
+    if (match) {
+      try {
+        return JSON.parse(match[0]);
+      } catch (e) {
+        continue;
+      }
+    }
+  }
+
+  throw new Error('Failed to parse AI response with all methods');
+}
+
+serve(async (req) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { headers: corsHeaders });
+  }
+
+  try {
+    const {
+      projectId,
+      shareToken,
+      agentFlow,
+      attachedContext,
+      iterations,
+      orchestratorEnabled = true,
+      drawEdges = true,
+      startFromNodeId,
+      agentPrompts = {},
+      selectedModel = 'gemini-2.5-flash',
+      maxTokens = 32768,
+      thinkingEnabled = false,
+      thinkingBudget = -1,
+    } = await req.json();
+
+    // shareToken must be explicitly passed (can be null for authenticated users)
+    if (!projectId || shareToken === undefined) {
+      throw new Error('projectId and shareToken are required');
+    }
+
+    if (!agentFlow?.nodes || agentFlow.nodes.length === 0) {
+      throw new Error('Agent flow must have at least one agent');
+    }
+
+    // Determine which API key to use based on model
+    let apiKey: string;
+    let apiProvider: 'gemini' | 'anthropic' | 'xai';
+    
+    if (selectedModel.startsWith('gemini-')) {
+      apiKey = Deno.env.get('GEMINI_API_KEY') || '';
+      apiProvider = 'gemini';
+      if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
+    } else if (selectedModel.startsWith('claude-')) {
+      apiKey = Deno.env.get('ANTHROPIC_API_KEY') || '';
+      apiProvider = 'anthropic';
+      if (!apiKey) throw new Error('ANTHROPIC_API_KEY not configured');
+    } else if (selectedModel.startsWith('grok-')) {
+      apiKey = Deno.env.get('XAI_API_KEY') || '';
+      apiProvider = 'xai';
+      if (!apiKey) throw new Error('XAI_API_KEY not configured');
+    } else {
+      throw new Error(`Unsupported model: ${selectedModel}`);
+    }
+
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseKey = Deno.env.get('SUPABASE_ANON_KEY')!;
+    const authHeader = req.headers.get('Authorization');
+
+    const supabase = createClient(supabaseUrl, supabaseKey, {
+      global: {
+        headers: authHeader ? { Authorization: authHeader } : {},
+      },
+    });
+
+    // Validate project access AND check role BEFORE streaming
+    const { data: role, error: roleError } = await supabase.rpc('authorize_project_access', {
+      p_project_id: projectId,
+      p_token: shareToken,
+    });
+
+    if (roleError || !role) {
+      console.error('[orchestrate-agents] Access denied:', roleError);
+      throw new Error('Access denied');
+    }
+
+    // orchestrate-agents modifies canvas - requires editor role
+    if (role !== 'owner' && role !== 'editor') {
+      console.error('[orchestrate-agents] Insufficient permissions:', role);
+      return new Response(
+        JSON.stringify({ error: 'Insufficient permissions: editor role required to run agents' }),
+        { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
+    // Fetch node types from database for dynamic configuration
+    const { data: nodeTypesData, error: nodeTypesError } = await supabase.rpc('get_canvas_node_types', {
+      p_include_legacy: true // Include legacy for validation/mapping
+    });
+
+    if (nodeTypesError) {
+      console.error('[orchestrate-agents] Failed to fetch node types:', nodeTypesError);
+      throw new Error('Failed to fetch node types configuration');
+    }
+
+    const nodeTypes: CanvasNodeType[] = nodeTypesData || [];
+    console.log(`[orchestrate-agents] Loaded ${nodeTypes.length} node types from database`);
+
+    // Build dynamic lookups from database
+    const FLOW_ORDER = buildFlowOrder(nodeTypes);
+    const X_POSITIONS = buildXPositions(nodeTypes);
+    const allowedNodeTypes = buildAllowedTypes(nodeTypes);
+
+    // Create getFlowRank function with dynamic FLOW_ORDER
+    const getFlowRank = (nodeType: string): number => {
+      const type = (nodeType || '').toUpperCase();
+      return FLOW_ORDER[type] || 5; // Default to middle rank
+    };
+
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      async start(controller) {
+        const send = (data: any) => {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        };
+
+        try {
+
+          // Get execution order from agent flow edges
+          let executionOrder = buildExecutionOrder(agentFlow.nodes, agentFlow.edges);
+          
+          // If startFromNodeId is specified, start execution from that node
+          if (startFromNodeId) {
+            const startIndex = executionOrder.findIndex((n) => n.id === startFromNodeId);
+            if (startIndex > 0) {
+              executionOrder = executionOrder.slice(startIndex);
+            }
+          }
+          
+          const changeLogs: ChangeLogEntry[] = [];
+          const metrics: ChangeMetric[] = [];
+          const blackboard: string[] = []; // Shared memory for all agents
+
+          // Initialize delta with user's ProjectSelector canvas selection (if any)
+          // Delta tracks cumulative changes: what was selected + all agent modifications
+          const deltaNodes = attachedContext?.canvasNodes ? [...attachedContext.canvasNodes] : [];
+          const deltaEdges = attachedContext?.canvasEdges ? [...attachedContext.canvasEdges] : [];
+          
+          // Track IDs for quick lookup
+          const deltaNodeIds = new Set(deltaNodes.map((n: any) => n.id));
+          const deltaEdgeIds = new Set(deltaEdges.map((e: any) => e.id));
+
+          // Run iterations
+          for (let iteration = 1; iteration <= iterations; iteration++) {
+            send({ 
+              type: 'iteration_start', 
+              iteration,
+              totalIterations: iterations 
+            });
+
+            // Execute each agent in order - pass cumulative delta to each agent
+            for (const agentNode of executionOrder) {
+              send({
+                type: 'agent_start',
+                iteration,
+                agentId: agentNode.data.type,
+                agentLabel: agentNode.data.label,
+              });
+
+              try {
+                // Validate agent is connected
+                const isConnected = agentFlow.edges.some(
+                  (e: any) => e.source === agentNode.id || e.target === agentNode.id
+                );
+                if (!isConnected && agentFlow.nodes.length > 1) {
+                  throw new Error(`Agent ${agentNode.data.label} is not connected to the flow`);
+                }
+
+                // CONTEXT PASSED TO EACH AGENT:
+                // 1. ProjectSelector content (artifacts, chat, requirements, standards, tech stacks)
+                // 2. Blackboard shared memory (orchestrator guidance from all previous agents)
+                // 3. CUMULATIVE DELTA of canvas nodes/edges:
+                //    - Starts with whatever user selected in ProjectSelector (could be nothing)
+                //    - Accumulates all additions/edits/deletions from previous agents in this iteration
+                const result = await executeAgent(
+                  agentNode,
+                  {
+                    projectId,
+                    shareToken,
+                    currentNodes: deltaNodes,
+                    currentEdges: deltaEdges,
+                    attachedContext,
+                    iteration,
+                    capabilities: agentNode.data.capabilities,
+                    blackboard,
+                    customPrompt: agentPrompts[agentNode.id],
+                    selectedModel,
+                    maxTokens,
+                    thinkingEnabled,
+                    thinkingBudget,
+                    drawEdges,
+                    // Pass dynamic node type configuration
+                    nodeTypes,
+                    FLOW_ORDER,
+                    X_POSITIONS,
+                    allowedNodeTypes,
+                    getFlowRank,
+                  },
+                  supabase,
+                  apiKey,
+                  apiProvider
+                );
+
+                // Apply agent's changes to the cumulative delta
+                // Fetch updated canvas state once to sync delta with DB reality
+                const { data: allCurrentNodes } = await supabase.rpc('get_canvas_nodes_with_token', {
+                  p_project_id: projectId,
+                  p_token: shareToken,
+                });
+                const { data: allCurrentEdges } = await supabase.rpc('get_canvas_edges_with_token', {
+                  p_project_id: projectId,
+                  p_token: shareToken,
+                });
+                
+                // Nodes added: find newly created nodes and add to delta
+                if (result.newNodeIds && result.newNodeIds.length > 0) {
+                  for (const newId of result.newNodeIds) {
+                    const fetchedNode = (allCurrentNodes || []).find((n: any) => n.id === newId);
+                    if (fetchedNode && !deltaNodeIds.has(fetchedNode.id)) {
+                      deltaNodes.push(fetchedNode);
+                      deltaNodeIds.add(fetchedNode.id);
+                    }
+                  }
+                }
+
+                // Nodes edited: update in delta with fresh DB data
+                if (result.nodesToEdit && result.nodesToEdit.length > 0) {
+                  for (const editedNode of result.nodesToEdit) {
+                    const idx = deltaNodes.findIndex((n: any) => n.id === editedNode.id);
+                    if (idx !== -1) {
+                      const fetchedNode = (allCurrentNodes || []).find((n: any) => n.id === editedNode.id);
+                      if (fetchedNode) {
+                        deltaNodes[idx] = fetchedNode;
+                      }
+                    }
+                  }
+                }
+
+                // Nodes deleted: remove from delta
+                if (result.nodesToDelete && result.nodesToDelete.length > 0) {
+                  for (const deleteId of result.nodesToDelete) {
+                    const idx = deltaNodes.findIndex((n: any) => n.id === deleteId);
+                    if (idx !== -1) {
+                      deltaNodes.splice(idx, 1);
+                      deltaNodeIds.delete(deleteId);
+                    }
+                  }
+                }
+
+                // Edges added: find newly created edges and add to delta
+                if (result.edgesToAdd && result.edgesToAdd.length > 0) {
+                  for (const edgeSpec of result.edgesToAdd) {
+                    // Find the edge that was just created (matching source/target)
+                    const fetchedEdge = (allCurrentEdges || []).find((e: any) => 
+                      e.source_id === edgeSpec.source && e.target_id === edgeSpec.target && !deltaEdgeIds.has(e.id)
+                    );
+                    if (fetchedEdge) {
+                      deltaEdges.push(fetchedEdge);
+                      deltaEdgeIds.add(fetchedEdge.id);
+                    }
+                  }
+                }
+
+                // Edges edited: update in delta with fresh DB data
+                if (result.edgesToEdit && result.edgesToEdit.length > 0) {
+                  for (const editedEdge of result.edgesToEdit) {
+                    const idx = deltaEdges.findIndex((e: any) => e.id === editedEdge.id);
+                    if (idx !== -1) {
+                      const fetchedEdge = (allCurrentEdges || []).find((e: any) => e.id === editedEdge.id);
+                      if (fetchedEdge) {
+                        deltaEdges[idx] = fetchedEdge;
+                      }
+                    }
+                  }
+                }
+
+                // Edges deleted: remove from delta
+                if (result.edgesToDelete && result.edgesToDelete.length > 0) {
+                  for (const deleteId of result.edgesToDelete) {
+                    const idx = deltaEdges.findIndex((e: any) => e.id === deleteId);
+                    if (idx !== -1) {
+                      deltaEdges.splice(idx, 1);
+                      deltaEdgeIds.delete(deleteId);
+                    }
+                  }
+                }
+
+                // Record changes
+                const changeLog: ChangeLogEntry = {
+                  iteration,
+                  agentId: agentNode.data.type,
+                  agentLabel: agentNode.data.label,
+                  timestamp: new Date().toISOString(),
+                  changes: result.changes,
+                  reasoning: result.reasoning,
+                };
+                changeLogs.push(changeLog);
+
+                const metric: ChangeMetric = {
+                  iteration,
+                  agentId: agentNode.data.type,
+                  agentLabel: agentNode.data.label,
+                  nodesAdded: result.metrics.nodesAdded,
+                  nodesEdited: result.metrics.nodesEdited,
+                  nodesDeleted: result.metrics.nodesDeleted,
+                  edgesAdded: result.metrics.edgesAdded,
+                  edgesEdited: result.metrics.edgesEdited,
+                  edgesDeleted: result.metrics.edgesDeleted,
+                  timestamp: new Date().toISOString(),
+                };
+                metrics.push(metric);
+
+                send({
+                  type: 'agent_complete',
+                  iteration,
+                  agentId: agentNode.data.type,
+                  changeLog,
+                  metric,
+                  currentCounts: {
+                    nodes: deltaNodes.length,
+                    edges: deltaEdges.length,
+                  },
+                });
+
+                // Call orchestrator after each agent execution
+                if (orchestratorEnabled) {
+                  try {
+                    const orchestratorGuidance = await executeOrchestrator(
+                      {
+                        agentLabel: agentNode.data.label,
+                        changes: result.changes,
+                        reasoning: result.reasoning,
+                        currentNodes: deltaNodes,
+                        currentEdges: deltaEdges,
+                        attachedContext,
+                        blackboard,
+                        iteration,
+                        selectedModel,
+                        maxTokens,
+                        thinkingEnabled,
+                        thinkingBudget,
+                        nodeTypes,
+                        FLOW_ORDER,
+                        getFlowRank,
+                      },
+                      apiKey,
+                      apiProvider
+                    );
+
+                    // Add to blackboard
+                    const blackboardEntry = `[Iteration ${iteration} - After ${agentNode.data.label}]: ${orchestratorGuidance}`;
+                    blackboard.push(blackboardEntry);
+
+                    send({
+                      type: 'blackboard_update',
+                      iteration,
+                      entry: blackboardEntry,
+                      blackboard: [...blackboard],
+                    });
+                  } catch (orchError) {
+                    console.error('Orchestrator error:', orchError);
+                    // Continue execution even if orchestrator fails
+                  }
+                }
+              } catch (agentError) {
+                console.error(`Agent ${agentNode.data.label} error:`, agentError);
+                
+                // Check for API payment/rate limit errors
+                const errorMsg = agentError instanceof Error ? agentError.message : 'Unknown error';
+                if (errorMsg.includes('402') || errorMsg.includes('Payment Required')) {
+                  send({
+                    type: 'agent_error',
+                    iteration,
+                    agentId: agentNode.data.type,
+                    error: `API credits exhausted. Please add funds to your ${apiProvider.toUpperCase()} account.`,
+                  });
+                  throw agentError; // Stop iteration on payment errors
+                }
+                
+                // Error recovery with retry logic
+                let retrySuccess = false;
+                for (let retryAttempt = 1; retryAttempt <= 2; retryAttempt++) {
+                  try {
+                    send({
+                      type: 'agent_retry',
+                      iteration,
+                      agentId: agentNode.data.type,
+                      attempt: retryAttempt,
+                    });
+                    
+                    await new Promise(resolve => setTimeout(resolve, 1000 * retryAttempt));
+                    
+                    const result = await executeAgent(
+                      agentNode,
+                      {
+                        projectId,
+                        shareToken,
+                        currentNodes: deltaNodes,
+                        currentEdges: deltaEdges,
+                        attachedContext,
+                        iteration,
+                        capabilities: agentNode.data.capabilities,
+                        blackboard,
+                        selectedModel,
+                        maxTokens,
+                        thinkingEnabled,
+                        thinkingBudget,
+                        drawEdges,
+                        nodeTypes,
+                        FLOW_ORDER,
+                        X_POSITIONS,
+                        allowedNodeTypes,
+                        getFlowRank,
+                      },
+                      supabase,
+                      apiKey,
+                      apiProvider
+                    );
+                    
+                    // Record successful retry
+                    const changeLog: ChangeLogEntry = {
+                      iteration,
+                      agentId: agentNode.data.type,
+                      agentLabel: agentNode.data.label,
+                      timestamp: new Date().toISOString(),
+                      changes: result.changes,
+                      reasoning: `[RETRY ${retryAttempt}] ${result.reasoning}`,
+                    };
+                    changeLogs.push(changeLog);
+
+                    const metric: ChangeMetric = {
+                      iteration,
+                      agentId: agentNode.data.type,
+                      agentLabel: agentNode.data.label,
+                      nodesAdded: result.metrics.nodesAdded,
+                      nodesEdited: result.metrics.nodesEdited,
+                      nodesDeleted: result.metrics.nodesDeleted,
+                      edgesAdded: result.metrics.edgesAdded,
+                      edgesEdited: result.metrics.edgesEdited,
+                      edgesDeleted: result.metrics.edgesDeleted,
+                      timestamp: new Date().toISOString(),
+                    };
+                    metrics.push(metric);
+
+                    send({
+                      type: 'agent_complete',
+                      iteration,
+                      agentId: agentNode.data.type,
+                      changeLog,
+                      metric,
+                    });
+                    
+                    retrySuccess = true;
+                    break;
+                  } catch (retryError) {
+                    if (retryAttempt === 2) {
+                      send({
+                        type: 'agent_error',
+                        iteration,
+                        agentId: agentNode.data.type,
+                        error: agentError instanceof Error ? agentError.message : 'Unknown error',
+                      });
+                    }
+                  }
+                }
+              }
+            }
+
+            send({ type: 'iteration_complete', iteration });
+          }
+
+          send({
+            type: 'complete',
+            changeLogs,
+            metrics,
+          });
+
+          controller.close();
+        } catch (error) {
+          console.error('Orchestration error:', error);
+          send({
+            type: 'error',
+            message: error instanceof Error ? error.message : 'Unknown error',
+          });
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        ...corsHeaders,
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
+    });
+  } catch (error) {
+    console.error('Error:', error);
+    return new Response(
+      JSON.stringify({ error: error instanceof Error ? error.message : 'Unknown error' }),
+      {
+        status: 500,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      }
+    );
+  }
+});
+
+function buildExecutionOrder(nodes: AgentNode[], edges: any[]): AgentNode[] {
+  // Build adjacency list
+  const graph = new Map<string, string[]>();
+  nodes.forEach(node => graph.set(node.id, []));
+  edges.forEach(edge => {
+    const targets = graph.get(edge.source) || [];
+    targets.push(edge.target);
+    graph.set(edge.source, targets);
+  });
+
+  // Find starting node (node with no incoming edges)
+  const incomingCount = new Map<string, number>();
+  nodes.forEach(node => incomingCount.set(node.id, 0));
+  edges.forEach(edge => {
+    incomingCount.set(edge.target, (incomingCount.get(edge.target) || 0) + 1);
+  });
+
+  let startNode = nodes.find(node => (incomingCount.get(node.id) || 0) === 0);
+  if (!startNode) startNode = nodes[0]; // Fallback to first node
+
+  // Traverse graph to build execution order
+  const order: AgentNode[] = [];
+  const visited = new Set<string>();
+  
+  const traverse = (nodeId: string) => {
+    if (visited.has(nodeId)) return;
+    visited.add(nodeId);
+    
+    const node = nodes.find(n => n.id === nodeId);
+    if (node) {
+      order.push(node);
+      const neighbors = graph.get(nodeId) || [];
+      neighbors.forEach(neighbor => traverse(neighbor));
+    }
+  };
+
+  traverse(startNode.id);
+
+  // Add any unvisited nodes
+  nodes.forEach(node => {
+    if (!visited.has(node.id)) {
+      order.push(node);
+    }
+  });
+
+  return order;
+}
+
+async function executeAgent(
+  agentNode: AgentNode,
+  context: any,
+  supabase: any,
+  apiKey: string,
+  apiProvider: 'gemini' | 'anthropic' | 'xai'
+) {
+  const systemPrompt = context.customPrompt?.system || agentNode.data.systemPrompt;
+  const userAddition = context.customPrompt?.user || '';
+  const capabilities = context.capabilities || [];
+  const selectedModel = context.selectedModel || 'gemini-2.5-flash';
+  const maxTokens = context.maxTokens || 32768;
+  const thinkingEnabled = context.thinkingEnabled || false;
+  const thinkingBudget = context.thinkingBudget || -1;
+  const drawEdges = context.drawEdges !== undefined ? context.drawEdges : true;
+  
+  // Use dynamic node types from context
+  const nodeTypes: CanvasNodeType[] = context.nodeTypes || [];
+  const FLOW_ORDER: Record<string, number> = context.FLOW_ORDER || {};
+  const X_POSITIONS: Record<string, number> = context.X_POSITIONS || {};
+  const allowedNodeTypes: string[] = context.allowedNodeTypes || [];
+  const getFlowRank = context.getFlowRank || ((t: string) => FLOW_ORDER[t.toUpperCase()] || 5);
+  
+  // Build context prompt
+  let contextPrompt = `Current Canvas Delta (Cumulative Changes):\n`;
+  contextPrompt += `This represents the starting selection from ProjectSelector plus all modifications made by previous agents in this iteration.\n`;
+  contextPrompt += `- Nodes in delta: ${context.currentNodes.length}\n`;
+  contextPrompt += `- Edges in delta: ${context.currentEdges.length}\n\n`;
+
+  // Add Blackboard memory if available
+  if (context.blackboard && context.blackboard.length > 0) {
+    contextPrompt += `\n=== SHARED BLACKBOARD MEMORY ===\n`;
+    contextPrompt += `The following guidance has been provided by the Orchestrator for all agents:\n\n`;
+    contextPrompt += context.blackboard.join('\n\n');
+    contextPrompt += `\n=== END BLACKBOARD ===\n\n`;
+  }
+
+  // Include ALL ProjectSelector context
+  if (context.attachedContext) {
+    // Project Metadata
+    if (context.attachedContext.projectMetadata) {
+      contextPrompt += `=== PROJECT METADATA ===\n`;
+      const meta = context.attachedContext.projectMetadata;
+      contextPrompt += `Name: ${meta.name}\n`;
+      if (meta.description) contextPrompt += `Description: ${meta.description}\n`;
+      if (meta.organization) contextPrompt += `Organization: ${meta.organization}\n`;
+      if (meta.scope) contextPrompt += `Scope: ${meta.scope}\n`;
+      if (meta.budget) contextPrompt += `Budget: ${meta.budget}\n`;
+      contextPrompt += '\n';
+    }
+
+    // Artifacts
+    if (context.attachedContext.artifacts?.length > 0) {
+      contextPrompt += `=== ARTIFACTS (${context.attachedContext.artifacts.length}) ===\n`;
+      context.attachedContext.artifacts.forEach((artifact: any) => {
+        contextPrompt += `- [${artifact.ai_title || 'Untitled'}]\n`;
+        if (artifact.ai_summary) contextPrompt += `  Summary: ${artifact.ai_summary}\n`;
+        if (artifact.content) contextPrompt += `  Content: ${artifact.content.substring(0, 200)}${artifact.content.length > 200 ? '...' : ''}\n`;
+      });
+      contextPrompt += '\n';
+    }
+
+    // Chat Sessions
+    if (context.attachedContext.chatSessions?.length > 0) {
+      contextPrompt += `=== CHAT SESSIONS (${context.attachedContext.chatSessions.length}) ===\n`;
+      context.attachedContext.chatSessions.forEach((session: any) => {
+        contextPrompt += `- [${session.ai_title || session.title || 'Untitled Chat'}]\n`;
+        if (session.ai_summary) contextPrompt += `  Summary: ${session.ai_summary}\n`;
+      });
+      contextPrompt += '\n';
+    }
+
+    // Requirements
+    if (context.attachedContext.requirements?.length > 0) {
+      contextPrompt += `=== REQUIREMENTS (${context.attachedContext.requirements.length}) ===\n`;
+      context.attachedContext.requirements.forEach((req: any) => {
+        contextPrompt += `- ${req.code || ''} ${req.title}: ${req.content || 'No description'}\n`;
+      });
+      contextPrompt += '\n';
+    }
+
+    // Standards
+    if (context.attachedContext.standards?.length > 0) {
+      contextPrompt += `=== STANDARDS (${context.attachedContext.standards.length}) ===\n`;
+      context.attachedContext.standards.forEach((std: any) => {
+        contextPrompt += `- ${std.code || ''} ${std.title}: ${std.description || 'No description'}\n`;
+      });
+      contextPrompt += '\n';
+    }
+
+    // Tech Stacks
+    if (context.attachedContext.techStacks?.length > 0) {
+      contextPrompt += `=== TECH STACKS (${context.attachedContext.techStacks.length}) ===\n`;
+      context.attachedContext.techStacks.forEach((ts: any) => {
+        contextPrompt += `- ${ts.name}: ${ts.description || 'No description'}\n`;
+      });
+      contextPrompt += '\n';
+    }
+
+    // Canvas Context (nodes/edges/layers from ProjectSelector)
+    if (context.attachedContext.canvasNodes?.length > 0) {
+      contextPrompt += `=== SELECTED CANVAS NODES (${context.attachedContext.canvasNodes.length}) ===\n`;
+      context.attachedContext.canvasNodes.forEach((node: any) => {
+        contextPrompt += `- ${node.data?.label || 'Unnamed'} (${node.type})\n`;
+        if (node.data?.description) contextPrompt += `  Description: ${node.data.description}\n`;
+      });
+      contextPrompt += '\n';
+    }
+
+    if (context.attachedContext.canvasEdges?.length > 0) {
+      contextPrompt += `=== SELECTED CANVAS EDGES (${context.attachedContext.canvasEdges.length}) ===\n`;
+      context.attachedContext.canvasEdges.forEach((edge: any) => {
+        contextPrompt += `- ${edge.source_id} -> ${edge.target_id}${edge.label ? ` (${edge.label})` : ''}\n`;
+      });
+      contextPrompt += '\n';
+    }
+
+    if (context.attachedContext.canvasLayers?.length > 0) {
+      contextPrompt += `=== SELECTED CANVAS LAYERS (${context.attachedContext.canvasLayers.length}) ===\n`;
+      context.attachedContext.canvasLayers.forEach((layer: any) => {
+        contextPrompt += `- ${layer.name} (${layer.node_ids?.length || 0} nodes)\n`;
+      });
+      contextPrompt += '\n';
+    }
+
+    if (context.attachedContext.files?.length > 0) {
+      contextPrompt += `=== REPOSITORY FILES (${context.attachedContext.files.length}) ===\n`;
+      context.attachedContext.files.forEach((file: any) => {
+        contextPrompt += `--- File: ${file.path} ---\n`;
+        contextPrompt += `${file.content?.substring(0, 500)}${file.content?.length > 500 ? '...[truncated]' : ''}\n\n`;
+      });
+      contextPrompt += '\n';
+    }
+  }
+
+  // Build dynamic node type descriptions
+  const nodeTypeDescriptions = buildNodeTypeDescriptions(nodeTypes);
+  const flowHierarchy = buildFlowHierarchy(nodeTypes);
+
+  // Explain allowed node types and ID usage
+  contextPrompt += `=== NODE TYPE & ID RULES ===\n`;
+  contextPrompt += `Allowed node types:\n${nodeTypeDescriptions}\n\n`;
+  contextPrompt += `Flow hierarchy (edges must flow left to right):\n${flowHierarchy}\n\n`;
+  contextPrompt += `- For edgesToAdd, source and target MUST be node IDs from the list below (not labels).\n`;
+  contextPrompt += `- If you create new nodes, you may optionally include an "id" field using a UUID string; otherwise only connect edges between existing node IDs.\n\n`;
+
+  contextPrompt += `Current Nodes in Delta:\n`;
+  contextPrompt += `This list represents what the user originally selected plus all nodes added/edited by previous agents in this iteration.\n`;
+  context.currentNodes.forEach((node: any) => {
+    const nodeType = node.type || node.data?.type || 'UNKNOWN';
+    const flowRank = getFlowRank(nodeType);
+    contextPrompt += `- ${node.id}: ${node.data?.label || 'Unnamed'} (Type: ${nodeType}, FlowRank: ${flowRank})\n`;
+  });
+  contextPrompt += `\n`;
+
+  contextPrompt += `Current Edges in Delta:\n`;
+  contextPrompt += `This list represents what the user originally selected plus all edges added/edited by previous agents in this iteration.\n`;
+  if (context.currentEdges && context.currentEdges.length > 0) {
+    context.currentEdges.forEach((edge: any) => {
+      contextPrompt += `- ${edge.id}: ${edge.source_id || edge.source} -> ${edge.target_id || edge.target}${edge.label ? ` (Label: ${edge.label})` : ''}\n`;
+    });
+  } else {
+    contextPrompt += `(No edges in delta yet)\n`;
+  }
+  contextPrompt += `\nIMPORTANT: The nodes and edges listed above are the WORKING DELTA that accumulates all changes across agents in this iteration:\n`;
+  contextPrompt += `- Original items from user's ProjectSelector selection (if any)\n`;
+  contextPrompt += `- All nodes/edges added by previous agents in this iteration\n`;
+  contextPrompt += `- All modifications made by previous agents\n`;
+  contextPrompt += `Do NOT recreate existing items. Only add NEW elements that don't already exist in the delta.\n`;
+
+  contextPrompt += `\nYour Task: Analyze the above and determine what changes are needed. Return a JSON object with:\n`;
+  contextPrompt += `{\n`;
+  contextPrompt += `  "reasoning": "Your analysis and reasoning",\n`;
+  contextPrompt += `  "nodesToAdd": [{ "type": "WEB_COMPONENT", "label": "Name", "description": "..." }],\n`;
+  contextPrompt += `  "nodesToEdit": [{ "id": "node-uuid", "updates": { "label": "New name" } }],\n`;
+  contextPrompt += `  "nodesToDelete": ["node-uuid-1", "node-uuid-2"],\n`;
+  contextPrompt += `  "edgesToAdd": [{ "source": "node-uuid-1", "target": "node-uuid-2", "label": "Connection" }],\n`;
+  contextPrompt += `  "edgesToDelete": ["edge-uuid-1"]\n`;
+  contextPrompt += `}\n`;
+  
+  if (userAddition) {
+    contextPrompt += `\n=== ADDITIONAL INSTRUCTIONS ===\n${userAddition}\n=== END ADDITIONAL INSTRUCTIONS ===\n`;
+  }
+
+  // Call AI based on provider
+  let response: Response;
+  
+  if (apiProvider === 'gemini') {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [{ text: `${systemPrompt}\n\n${contextPrompt}` }]
+          }],
+          generationConfig: {
+            temperature: 0.4, // Lower temperature for more deterministic output
+            maxOutputTokens: maxTokens,
+            ...(selectedModel !== 'gemini-2.5-pro' && {
+              thinkingConfig: { thinkingBudget: thinkingEnabled ? thinkingBudget : 0 }
+            })
+          }
+        })
+      }
+    );
+  } else if (apiProvider === 'anthropic') {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        max_tokens: maxTokens,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: contextPrompt }]
+      })
+    });
+  } else if (apiProvider === 'xai') {
+    // xAI/Grok doesn't respect system prompts, must prepend to user message
+    const combinedPrompt = `${systemPrompt}\n\n${contextPrompt}`;
+    response = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: [{ role: 'user', content: combinedPrompt }],
+        response_format: { type: 'json_object' },
+      })
+    });
+  } else {
+    throw new Error(`Unsupported API provider: ${apiProvider}`);
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`AI API Error: ${response.status} ${errorText}`);
+  }
+
+  const aiData = await response.json();
+  
+  // Use robust JSON parsing
+  let aiResponse;
+  try {
+    let content: string;
+    
+    if (apiProvider === 'gemini') {
+      content = aiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+    } else if (apiProvider === 'anthropic') {
+      content = aiData.content?.[0]?.text || '';
+    } else {
+      content = aiData.choices?.[0]?.message?.content || '';
+    }
+    console.log('Raw AI response:', content);
+    
+    aiResponse = parseAIResponse(content);
+    console.log('Parsed AI response:', aiResponse);
+  } catch (parseError) {
+    console.error('Failed to parse AI response:', parseError);
+    throw new Error(`Failed to parse AI response: ${parseError instanceof Error ? parseError.message : 'Unknown error'}`);
+  }
+
+  // Apply changes via RPC
+  let nodesAdded = 0, nodesEdited = 0, nodesDeleted = 0;
+  let edgesAdded = 0, edgesEdited = 0, edgesDeleted = 0;
+
+  // Track any newly created node IDs so edges can safely target them if needed
+  const newNodeIds: string[] = [];
+  
+  // Build a map of node IDs to their types for flow validation
+  const nodeTypeMap = new Map<string, string>();
+  context.currentNodes.forEach((n: any) => {
+    nodeTypeMap.set(n.id, n.type || n.data?.type || 'WEB_COMPONENT');
+  });
+
+  // Validate capabilities before applying changes
+  const canAddNodes = capabilities.length === 0 || capabilities.includes('add_nodes');
+  const canEditNodes = capabilities.length === 0 || capabilities.includes('edit_nodes');
+  const canDeleteNodes = capabilities.length === 0 || capabilities.includes('delete_nodes');
+  const canAddEdges = capabilities.length === 0 || capabilities.includes('add_edges');
+  const canDeleteEdges = capabilities.length === 0 || capabilities.includes('delete_edges');
+
+  // Add nodes
+  if (aiResponse.nodesToAdd && canAddNodes) {
+    console.log(`Adding ${aiResponse.nodesToAdd.length} nodes...`);
+    for (const nodeData of aiResponse.nodesToAdd) {
+      try {
+        const newNodeId = crypto.randomUUID();
+        console.log(`Creating node ${newNodeId}:`, nodeData);
+
+        // Map arbitrary LLM node types into allowed enum values
+        const rawType = typeof nodeData.type === 'string' ? nodeData.type.toUpperCase() : '';
+        let nodeType: string = 'WEB_COMPONENT';
+        if (allowedNodeTypes.includes(rawType)) {
+          nodeType = rawType;
+        } else if (rawType.includes('DATA')) {
+          nodeType = 'DATABASE';
+        } else if (rawType.includes('PROTOCOL') || rawType.includes('API')) {
+          nodeType = 'API_SERVICE';
+        }
+
+        // Use dynamic X position based on flow rank
+        const xPos = (X_POSITIONS[nodeType] || 700) + Math.random() * 100;
+        const yPos = Math.random() * 600;
+
+        const { data, error } = await supabase.rpc('upsert_canvas_node_with_token', {
+          p_id: newNodeId,
+          p_project_id: context.projectId,
+          p_token: context.shareToken,
+          p_type: nodeType,
+          p_position: { x: xPos, y: yPos },
+          p_data: { label: nodeData.label, description: nodeData.description, type: nodeType },
+        });
+        
+        if (error) {
+          console.error('Error adding node:', error);
+          throw error;
+        }
+        console.log('Node added successfully:', data);
+        newNodeIds.push(newNodeId);
+        nodeTypeMap.set(newNodeId, nodeType); // Track for edge validation
+        nodesAdded++;
+      } catch (err) {
+        console.error('Error adding node:', err);
+      }
+    }
+  } else if (aiResponse.nodesToAdd && !canAddNodes) {
+    console.warn(`Agent lacks 'add_nodes' capability, skipping ${aiResponse.nodesToAdd.length} node additions`);
+  }
+
+  // Edit nodes
+  if (aiResponse.nodesToEdit && canEditNodes) {
+    console.log(`Editing ${aiResponse.nodesToEdit.length} nodes...`);
+    for (const edit of aiResponse.nodesToEdit) {
+      try {
+        const existingNode = context.currentNodes.find((n: any) => n.id === edit.id);
+        if (existingNode) {
+          console.log(`Updating node ${edit.id}:`, edit.updates);
+          
+          const { data, error } = await supabase.rpc('upsert_canvas_node_with_token', {
+            p_id: edit.id,
+            p_project_id: context.projectId,
+            p_token: context.shareToken,
+            p_type: existingNode.type,
+            p_position: existingNode.position,
+            p_data: { ...existingNode.data, ...edit.updates, type: existingNode.type },
+          });
+          
+          if (error) {
+            console.error('Error editing node:', error);
+            throw error;
+          }
+          console.log('Node edited successfully:', data);
+          nodesEdited++;
+        } else {
+          console.warn(`Node ${edit.id} not found in current nodes`);
+        }
+      } catch (err) {
+        console.error('Error editing node:', err);
+      }
+    }
+  } else if (aiResponse.nodesToEdit && !canEditNodes) {
+    console.warn(`Agent lacks 'edit_nodes' capability, skipping ${aiResponse.nodesToEdit.length} node edits`);
+  }
+
+  // Delete nodes
+  if (aiResponse.nodesToDelete && canDeleteNodes) {
+    console.log(`Deleting ${aiResponse.nodesToDelete.length} nodes...`);
+    for (const nodeId of aiResponse.nodesToDelete) {
+      try {
+        console.log(`Deleting node ${nodeId}...`);
+        
+        const { error } = await supabase.rpc('delete_canvas_node_with_token', {
+          p_id: nodeId,
+          p_token: context.shareToken,
+        });
+        
+        if (error) {
+          console.error('Error deleting node:', error);
+          throw error;
+        }
+        console.log('Node deleted successfully');
+        nodesDeleted++;
+      } catch (err) {
+        console.error('Error deleting node:', err);
+      }
+    }
+  } else if (aiResponse.nodesToDelete && !canDeleteNodes) {
+    console.warn(`Agent lacks 'delete_nodes' capability, skipping ${aiResponse.nodesToDelete.length} node deletions`);
+  }
+
+  // Add edges (only if drawEdges is enabled)
+  if (drawEdges && aiResponse.edgesToAdd && canAddEdges) {
+    console.log(`Adding ${aiResponse.edgesToAdd.length} edges...`);
+
+    // Only allow edges between known node IDs to avoid invalid UUID errors
+    const validNodeIds = new Set<string>([
+      ...context.currentNodes.map((n: any) => n.id),
+      ...newNodeIds,
+    ]);
+
+    for (const edgeData of aiResponse.edgesToAdd) {
+      try {
+        if (!validNodeIds.has(edgeData.source) || !validNodeIds.has(edgeData.target)) {
+          console.warn('Skipping edge with unknown source/target IDs:', edgeData);
+          continue;
+        }
+
+        // AUTO-REVERSE: Check if edge flows backward and reverse it
+        const sourceType = nodeTypeMap.get(edgeData.source) || 'WEB_COMPONENT';
+        const targetType = nodeTypeMap.get(edgeData.target) || 'WEB_COMPONENT';
+        const sourceRank = getFlowRank(sourceType);
+        const targetRank = getFlowRank(targetType);
+        
+        let finalSource = edgeData.source;
+        let finalTarget = edgeData.target;
+        let finalLabel = edgeData.label || '';
+        
+        if (sourceRank > targetRank) {
+          // Edge is backward - auto-reverse it
+          console.warn(`Auto-reversing backward edge: ${sourceType}(${sourceRank}) -> ${targetType}(${targetRank})`);
+          finalSource = edgeData.target;
+          finalTarget = edgeData.source;
+          finalLabel = finalLabel || 'depends on';
+        }
+
+        const newEdgeId = crypto.randomUUID();
+        console.log(`Creating edge ${newEdgeId}:`, { source: finalSource, target: finalTarget, label: finalLabel });
+        
+        const { data, error } = await supabase.rpc('upsert_canvas_edge_with_token', {
+          p_id: newEdgeId,
+          p_project_id: context.projectId,
+          p_token: context.shareToken,
+          p_source_id: finalSource,
+          p_target_id: finalTarget,
+          p_label: finalLabel,
+          p_edge_type: 'default',
+          p_style: {
+            stroke: 'hsl(var(--primary))',
+            strokeWidth: 2,
+          },
+        });
+        
+        if (error) {
+          console.error('Error adding edge:', error);
+          throw error;
+        }
+        console.log('Edge added successfully:', data);
+        edgesAdded++;
+      } catch (err) {
+        console.error('Error adding edge:', err);
+      }
+    }
+  } else if (aiResponse.edgesToAdd && !canAddEdges) {
+    console.warn(`Agent lacks 'add_edges' capability, skipping ${aiResponse.edgesToAdd.length} edge additions`);
+  } else if (!drawEdges && aiResponse.edgesToAdd) {
+    console.warn(`Draw Edges disabled, skipping ${aiResponse.edgesToAdd.length} edge additions`);
+  }
+
+  // Delete edges (only if drawEdges is enabled)
+  if (drawEdges && aiResponse.edgesToDelete && canDeleteEdges) {
+    console.log(`Deleting ${aiResponse.edgesToDelete.length} edges...`);
+    for (const edgeId of aiResponse.edgesToDelete) {
+      try {
+        console.log(`Deleting edge ${edgeId}...`);
+        
+        const { error } = await supabase.rpc('delete_canvas_edge_with_token', {
+          p_id: edgeId,
+          p_token: context.shareToken,
+        });
+        
+        if (error) {
+          console.error('Error deleting edge:', error);
+          throw error;
+        }
+        console.log('Edge deleted successfully');
+        edgesDeleted++;
+      } catch (err) {
+        console.error('Error deleting edge:', err);
+      }
+    }
+  } else if (aiResponse.edgesToDelete && !canDeleteEdges) {
+    console.warn(`Agent lacks 'delete_edges' capability, skipping ${aiResponse.edgesToDelete.length} edge deletions`);
+  } else if (!drawEdges && aiResponse.edgesToDelete) {
+    console.warn(`Draw Edges disabled, skipping ${aiResponse.edgesToDelete.length} edge deletions`);
+  }
+
+  return {
+    reasoning: aiResponse.reasoning || 'No reasoning provided',
+    changes: JSON.stringify({
+      nodesToAdd: aiResponse.nodesToAdd || [],
+      nodesToEdit: aiResponse.nodesToEdit || [],
+      nodesToDelete: aiResponse.nodesToDelete || [],
+      edgesToAdd: drawEdges ? (aiResponse.edgesToAdd || []) : [],
+      edgesToDelete: drawEdges ? (aiResponse.edgesToDelete || []) : [],
+    }, null, 2),
+    metrics: {
+      nodesAdded,
+      nodesEdited,
+      nodesDeleted,
+      edgesAdded,
+      edgesEdited,
+      edgesDeleted,
+    },
+    // Return actual arrays for delta tracking - filter edges if drawEdges is false
+    nodesToAdd: aiResponse.nodesToAdd || [],
+    nodesToEdit: aiResponse.nodesToEdit || [],
+    nodesToDelete: aiResponse.nodesToDelete || [],
+    edgesToAdd: drawEdges ? (aiResponse.edgesToAdd || []) : [],
+    edgesToEdit: drawEdges ? (aiResponse.edgesToEdit || []) : [],
+    edgesToDelete: drawEdges ? (aiResponse.edgesToDelete || []) : [],
+    newNodeIds,  // IDs of nodes created in this execution
+  };
+}
+
+async function executeOrchestrator(
+  context: {
+    agentLabel: string;
+    changes: string;
+    reasoning: string;
+    currentNodes: any[];
+    currentEdges: any[];
+    attachedContext: any;
+    blackboard: string[];
+    iteration: number;
+    selectedModel?: string;
+    maxTokens?: number;
+    thinkingEnabled?: boolean;
+    thinkingBudget?: number;
+    nodeTypes?: CanvasNodeType[];
+    FLOW_ORDER?: Record<string, number>;
+    getFlowRank?: (nodeType: string) => number;
+  },
+  apiKey: string,
+  apiProvider: 'gemini' | 'anthropic' | 'xai'
+): Promise<string> {
+  const selectedModel = context.selectedModel || 'gemini-2.5-flash';
+  const maxTokens = context.maxTokens || 8192;
+  const thinkingEnabled = context.thinkingEnabled || false;
+  const thinkingBudget = context.thinkingBudget || -1;
+  const FLOW_ORDER = context.FLOW_ORDER || {};
+  const getFlowRank = context.getFlowRank || ((t: string) => FLOW_ORDER[t.toUpperCase()] || 5);
+  
+  // Build dynamic flow hierarchy description
+  const flowHierarchy = context.nodeTypes ? buildFlowHierarchy(context.nodeTypes) : '';
+  
+  // Calculate topology score - count backward edges
+  let backwardEdgeCount = 0;
+  const backwardEdgeDetails: string[] = [];
+  
+  // Build node type map for current nodes
+  const nodeTypeMap = new Map<string, { type: string; label: string }>();
+  context.currentNodes.forEach((n: any) => {
+    nodeTypeMap.set(n.id, {
+      type: n.type || n.data?.type || 'WEB_COMPONENT',
+      label: n.data?.label || 'Unnamed'
+    });
+  });
+  
+  // Check each edge for backward flow
+  context.currentEdges.forEach((edge: any) => {
+    const sourceId = edge.source_id || edge.source;
+    const targetId = edge.target_id || edge.target;
+    const sourceInfo = nodeTypeMap.get(sourceId);
+    const targetInfo = nodeTypeMap.get(targetId);
+    
+    if (sourceInfo && targetInfo) {
+      const sourceRank = getFlowRank(sourceInfo.type);
+      const targetRank = getFlowRank(targetInfo.type);
+      
+      if (sourceRank > targetRank) {
+        backwardEdgeCount++;
+        backwardEdgeDetails.push(`${sourceInfo.label}(${sourceInfo.type}) → ${targetInfo.label}(${targetInfo.type})`);
+      }
+    }
+  });
+  
+  // Build topology warning if backward edges exist
+  let topologyWarning = '';
+  if (backwardEdgeCount > 0) {
+    topologyWarning = `\n\n⚠️ CRITICAL TOPOLOGY ISSUE: ${backwardEdgeCount} backward edge(s) detected that violate left-to-right flow:\n`;
+    backwardEdgeDetails.slice(0, 5).forEach(detail => {
+      topologyWarning += `  - ${detail}\n`;
+    });
+    if (backwardEdgeDetails.length > 5) {
+      topologyWarning += `  ... and ${backwardEdgeDetails.length - 5} more\n`;
+    }
+    topologyWarning += `\nFlow hierarchy:\n${flowHierarchy}\n`;
+    topologyWarning += `\nAll agents MUST fix these - edges should flow left to right through the hierarchy.\n`;
+  }
+  
+  const orchestratorPrompt = `You are the Orchestrator supervising all agents working on this architecture.
+
+**Agent That Just Completed**: ${context.agentLabel}
+**Iteration**: ${context.iteration}
+
+**Their Changes**:
+${context.changes}
+
+**Their Reasoning**:
+${context.reasoning}
+
+**Current Architecture State**:
+- Total Nodes: ${context.currentNodes.length}
+- Total Edges: ${context.currentEdges.length}
+- Topology Score: ${backwardEdgeCount === 0 ? '✓ All edges flow correctly' : `⚠️ ${backwardEdgeCount} backward edges detected`}
+${topologyWarning}
+
+**Shared Blackboard Memory** (Previous guidance from earlier in this iteration):
+${context.blackboard.length > 0 ? context.blackboard.join('\n') : 'No previous guidance yet this iteration.'}
+
+${context.attachedContext?.requirements?.length > 0 ? `\n**Requirements to Fulfill**: ${context.attachedContext.requirements.length} requirements` : ''}
+${context.attachedContext?.standards?.length > 0 ? `\n**Standards to Meet**: ${context.attachedContext.standards.length} standards` : ''}
+
+**Your Task**: Provide brief guidance (2-3 sentences) for all agents to consider. Focus on:
+- Architectural coherence and consistency
+- Missing critical elements
+- Potential conflicts or issues
+- Next priorities
+${backwardEdgeCount > 0 ? '- CRITICAL: Flag the backward edges and instruct agents to fix them' : ''}
+
+Keep it concise and actionable. This will be added to the Blackboard that all subsequent agents can reference.`;
+
+  let response: Response;
+  
+  if (apiProvider === 'gemini') {
+    response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${selectedModel}:generateContent?key=${apiKey}`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [{ text: orchestratorPrompt }]
+          }],
+          generationConfig: {
+            temperature: 0.4,
+            maxOutputTokens: maxTokens,
+            ...(selectedModel !== 'gemini-2.5-pro' && {
+              thinkingConfig: { thinkingBudget: thinkingEnabled ? thinkingBudget : 0 }
+            })
+          }
+        })
+      }
+    );
+  } else if (apiProvider === 'anthropic') {
+    response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        max_tokens: maxTokens,
+        messages: [{ role: 'user', content: orchestratorPrompt }]
+      })
+    });
+  } else {
+    response = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: selectedModel,
+        messages: [{ role: 'user', content: orchestratorPrompt }]
+      })
+    });
+  }
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Orchestrator AI API Error: ${response.status} ${errorText}`);
+  }
+
+  const aiData = await response.json();
+  
+  let guidance: string;
+  if (apiProvider === 'gemini') {
+    guidance = aiData.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  } else if (apiProvider === 'anthropic') {
+    guidance = aiData.content?.[0]?.text || '';
+  } else {
+    guidance = aiData.choices?.[0]?.message?.content || '';
+  }
+  
+  // Append topology score to guidance
+  if (backwardEdgeCount > 0) {
+    guidance = `[TOPOLOGY: ${backwardEdgeCount} backward edges] ${guidance.trim()}`;
+  }
+  
+  return guidance.trim();
+}

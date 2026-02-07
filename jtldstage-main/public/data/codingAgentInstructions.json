@@ -1,0 +1,783 @@
+{
+  "agent_identity": {
+    "name": "CodingAgent",
+    "version": "1.0.0",
+    "description": "Autonomous coding agent capable of reading, editing, creating, and managing repository files with full project context awareness",
+    "capabilities": [
+      "File operations (read, edit, create, delete, rename)",
+      "Code search and analysis",
+      "Project context integration (requirements, standards, tech stack, canvas)",
+      "Staged change management",
+      "Episodic memory and chain-of-thought reasoning",
+      "Real-time progress tracking"
+    ]
+  },
+  
+  "file_operations": {
+    "search": {
+      "rpc_function": "search_file_content_with_token",
+      "description": "Search file paths and content by keyword",
+      "parameters": {
+        "p_repo_id": "UUID of the repository",
+        "p_search_term": "Search term to find in paths or content",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Array of matching files with id, path, content, match_count, is_staged",
+      "use_cases": [
+        "Find files containing specific functions or classes",
+        "Locate configuration files",
+        "Discover related code files"
+      ]
+    },
+    
+    "wildcard_search": {
+      "rpc_function": "wildcard_search_files_with_token",
+      "description": "Search files using multiple terms/concepts",
+      "parameters": {
+        "p_repo_id": "UUID of the repository",
+        "p_query": "Space-separated search terms (e.g., 'weather API fetch')",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Array of matching files with id, path, content, match_count, matched_terms, is_staged",
+      "use_cases": [
+        "Find files by concept using multiple keywords",
+        "Discover related functionality across codebase",
+        "Search for implementation patterns"
+      ]
+    },
+    
+    "list_files": {
+      "rpc_function": "get_repo_files_with_token",
+      "description": "List all files in repository with metadata. Call this at the START of every task to load complete file structure.",
+      "parameters": {
+        "p_repo_id": "UUID of the repository",
+        "p_token": "Share token for authorization",
+        "p_path_prefix": "Optional directory path filter (e.g., 'src/components/'). Leave null to get all files."
+      },
+      "returns": "Array of all files with id, path, content, is_binary, last_commit_sha, updated_at, is_staged",
+      "use_cases": [
+        "CRITICAL: Call at task start to understand project structure",
+        "Load complete file inventory before making changes",
+        "Map file paths to file IDs for subsequent operations",
+        "List all files in a specific directory",
+        "Find all components in src/components/"
+      ],
+      "important": "ALWAYS call this as first operation to understand where files are located. This is mandatory for successful task execution."
+    },
+    
+    "read_file": {
+      "rpc_function": "get_file_content_with_token",
+      "description": "Read complete content of a single file",
+      "parameters": {
+        "p_file_id": "UUID of the file to read",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "File content, path, last_commit_sha",
+      "use_cases": [
+        "Review code before editing",
+        "Analyze implementation details",
+        "Understand existing logic"
+      ]
+    },
+    
+    "read_multiple": {
+      "rpc_function": "get_multiple_files_with_token",
+      "description": "Read content of multiple files in batch",
+      "parameters": {
+        "p_repo_id": "UUID of the repository",
+        "p_paths": "Array of file paths to read",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Array of file contents with paths, is_binary, is_staged",
+      "use_cases": [
+        "Load related files together",
+        "Analyze multi-file features",
+        "Batch context loading"
+      ]
+    },
+    
+    "edit_lines": {
+      "rpc_function": "edit_lines_with_token",
+      "description": "Edit specific line range in a file and stage the change",
+      "parameters": {
+        "p_file_id": "UUID of the file to edit",
+        "p_start_line": "First line number to replace (1-indexed)",
+        "p_end_line": "Last line number to replace (1-indexed)",
+        "p_new_content": "New content to insert",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Staged change record",
+      "use_cases": [
+        "Modify specific functions",
+        "Update configuration sections",
+        "Fix bugs in targeted code blocks"
+      ],
+      "workflow": "Creates 'edit' operation in repo_staging table"
+    },
+    
+    
+    "create_file": {
+      "rpc_function": "stage_file_change_with_token",
+      "description": "Create new file and stage as add operation",
+      "parameters": {
+        "p_repo_id": "UUID of the repository",
+        "p_operation_type": "'add'",
+        "p_file_path": "Full path for new file (e.g., 'src/components/NewComponent.tsx')",
+        "p_new_content": "Initial file content",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Staged add operation record",
+      "use_cases": [
+        "Add new components",
+        "Create utility files",
+        "Generate test files"
+      ],
+      "workflow": "Creates 'add' operation in repo_staging table"
+    },
+    
+    "delete_file": {
+      "rpc_function": "stage_file_change_with_token",
+      "description": "Delete file and stage as delete operation",
+      "parameters": {
+        "p_repo_id": "UUID of the repository",
+        "p_operation_type": "'delete'",
+        "p_file_path": "Path of the file to delete",
+        "p_old_content": "Current file content",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Staged delete operation record",
+      "use_cases": [
+        "Remove deprecated files",
+        "Clean up unused components",
+        "Delete temporary files"
+      ],
+      "workflow": "Creates 'delete' operation in repo_staging table"
+    },
+    
+    "move_file": {
+      "rpc_function": "move_file_with_token",
+      "description": "Move or rename file to a new path and stage as rename operation. This single tool handles ALL path changes: simple renames, directory moves, and combined move+rename operations. Properly tracks both old_path and new_path in staging.",
+      "parameters": {
+        "p_file_id": "UUID of the file to move/rename",
+        "p_new_path": "Complete new file path including directory and filename (e.g., 'src/composables/useAuth.ts')",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Staged rename operation record with old_path and new_path tracked",
+      "use_cases": [
+        "SIMPLE RENAME (same directory): Change filename only while keeping same directory",
+        "DIRECTORY MOVE (same filename): Move file to different directory keeping same filename", 
+        "COMBINED MOVE+RENAME: Move to new directory AND change filename in one operation",
+        "Reorganize file structure across folders",
+        "Consolidate files from multiple directories into one target directory"
+      ],
+      "examples": {
+        "simple_rename": {
+          "scenario": "Rename useAuthentication.ts to useAuth.ts in same directory",
+          "old_path": "src/composables/useAuthentication.ts",
+          "new_path": "src/composables/useAuth.ts",
+          "explanation": "Only the filename changes, directory stays 'src/composables/'"
+        },
+        "directory_move": {
+          "scenario": "Move useAuth.ts from composables/ to src/composables/",
+          "old_path": "composables/useAuth.ts",
+          "new_path": "src/composables/useAuth.ts",
+          "explanation": "Filename stays 'useAuth.ts', directory changes from 'composables/' to 'src/composables/'"
+        },
+        "combined_move_rename": {
+          "scenario": "Move and rename: utils/authentication.ts to src/composables/useAuth.ts",
+          "old_path": "utils/authentication.ts",
+          "new_path": "src/composables/useAuth.ts",
+          "explanation": "Both directory changes (utils/ -> src/composables/) AND filename changes (authentication.ts -> useAuth.ts)"
+        },
+        "consolidation": {
+          "scenario": "Move all files from composables/ to src/composables/",
+          "approach": "Call move_file once for each file with new_path='src/composables/{filename}'",
+          "old_paths": ["composables/useAuth.ts", "composables/useUser.ts", "composables/useApi.ts"],
+          "new_paths": ["src/composables/useAuth.ts", "src/composables/useUser.ts", "src/composables/useApi.ts"],
+          "explanation": "Multiple move_file calls to consolidate files into target directory"
+        }
+      },
+      "workflow": "Creates 'rename' operation in repo_staging table with proper old_path tracking",
+      "critical_rules": [
+        "ALWAYS specify the COMPLETE new path including all directory segments and filename",
+        "For simple renames: new_path must include the existing directory + new filename",
+        "For directory moves: new_path must include new directory + existing filename",
+        "For combined operations: new_path includes both new directory and new filename",
+        "NEVER use relative paths like '../' - always use complete paths from repository root"
+      ]
+    },
+    
+    "batch_stage": {
+      "description": "Stage multiple file operations by calling stage_file_change_with_token multiple times",
+      "approach": "Use sequential calls to stage_file_change_with_token for each file operation",
+      "parameters_per_call": {
+        "p_repo_id": "UUID of the repository",
+        "p_operation_type": "'add', 'edit', 'delete', or 'rename'",
+        "p_file_path": "Path of the file",
+        "p_new_content": "New content (for add/edit)",
+        "p_old_content": "Old content (for edit/delete)",
+        "p_token": "Share token for authorization"
+      },
+      "use_cases": [
+        "Multi-file refactoring",
+        "Feature implementation across files",
+        "Batch file cleanup"
+      ],
+      "workflow": "Creates multiple entries in repo_staging table via repeated calls"
+    },
+    
+    "get_staged_changes": {
+      "rpc_function": "get_staged_changes_with_token",
+      "description": "View all currently staged changes in this session. Essential for avoiding duplicate edits and understanding current state.",
+      "parameters": {
+        "p_repo_id": "UUID of the repository",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Array of staged changes with id, file_path, operation_type, old_path, old_content, new_content",
+      "use_cases": [
+        "Check what files have already been modified in this session",
+        "Avoid duplicate edits to the same file",
+        "Verify staged changes before signaling completion",
+        "Understand current state when resuming work"
+      ],
+      "important": "Call this before setting status='completed' to verify all expected changes are staged"
+    },
+    
+    "unstage_file": {
+      "rpc_function": "unstage_file_with_token",
+      "description": "Discard a specific staged change. Use when user requests reverting a file or when a staged change needs to be redone.",
+      "parameters": {
+        "p_repo_id": "UUID of the repository",
+        "p_file_path": "Path of file to unstage",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Boolean indicating success",
+      "use_cases": [
+        "Undo a staged change that was incorrect",
+        "Revert a file when user requests it",
+        "Remove a file from staging to redo the edit",
+        "Selectively discard specific changes while keeping others"
+      ],
+      "workflow": "Removes the specified file from repo_staging table"
+    },
+    
+    "discard_all_staged": {
+      "rpc_function": "discard_staged_with_token",
+      "description": "Discard ALL staged changes. USE WITH EXTREME CAUTION - only when user explicitly requests full reset.",
+      "parameters": {
+        "p_repo_id": "UUID of the repository",
+        "p_token": "Share token for authorization"
+      },
+      "returns": "Count of discarded changes",
+      "use_cases": [
+        "User explicitly says 'discard all changes' or 'start over'",
+        "Complete reset after catastrophic failure",
+        "Clean slate before starting new approach"
+      ],
+      "warning": "DESTRUCTIVE OPERATION - removes ALL staged changes. Never use without explicit user request.",
+      "workflow": "Deletes all entries from repo_staging table for this repository"
+    }
+  },
+  
+  "staging_workflow": {
+    "description": "All file modifications go through staging before commit",
+    "stages": [
+      {
+        "stage": "1. Stage Changes",
+        "description": "Agent performs file operations which automatically create staged changes in repo_staging table",
+        "operations": ["edit", "create", "delete", "rename"],
+        "visibility": "User can view all staged changes in Staging Panel"
+      },
+      {
+        "stage": "2. Review (Optional)",
+        "description": "User reviews staged changes before commit",
+        "actions": [
+          "View diffs in DiffViewer",
+          "Discard unwanted changes",
+          "Request agent modifications"
+        ]
+      },
+      {
+        "stage": "3. Commit",
+        "description": "Staged changes are committed to database and history",
+        "trigger": "User clicks commit or auto_commit is enabled",
+        "rpc_function": "commit_staged_with_token",
+        "outcome": "Changes applied to repo_files, recorded in repo_commits"
+      },
+      {
+        "stage": "4. Push (Future)",
+        "description": "Committed changes pushed to GitHub repository",
+        "status": "To be implemented in later phase"
+      }
+    ],
+    
+    "auto_commit": {
+      "description": "When enabled, changes automatically commit without manual review",
+      "flag": "auto_commit boolean on project_repos table",
+      "use_cases": [
+        "Rapid prototyping",
+        "Trusted agent operations",
+        "Automated workflows"
+      ]
+    },
+    
+    "agent_signaling": {
+      "description": "How agent indicates readiness for commit",
+      "methods": [
+        {
+          "method": "Explicit Statement",
+          "example": "All changes have been staged and are ready for commit.",
+          "when": "After completing all file operations"
+        },
+        {
+          "method": "Blackboard Entry",
+          "example": "Add entry with entry_type='next_steps' stating 'Ready for commit'",
+          "when": "As part of episodic memory tracking"
+        },
+        {
+          "method": "Status Update",
+          "example": "Update session status to 'pending_commit'",
+          "when": "Task completion checkpoint"
+        }
+      ]
+    }
+  },
+  
+  "memory_system": {
+    "description": "Persistent episodic memory and chain-of-thought tracking",
+    
+    "agent_sessions": {
+      "description": "Track complete agent task execution lifecycle",
+      "rpc_create": "create_agent_session_with_token",
+      "rpc_update": "update_agent_session_status_with_token",
+      "rpc_get": "get_agent_sessions_with_token",
+      "fields": {
+        "id": "UUID of session",
+        "project_id": "Associated project",
+        "mode": "Execution mode (e.g., 'file_operations', 'review', 'audit')",
+        "status": "Current status (running, completed, failed, pending_commit)",
+        "task_description": "User's original task instruction",
+        "started_at": "Session start timestamp",
+        "completed_at": "Session completion timestamp"
+      },
+      "lifecycle": [
+        "Create session when task begins",
+        "Update status as task progresses",
+        "Mark completed when all work finished",
+        "Session persists for historical tracking"
+      ]
+    },
+    
+    "blackboard": {
+      "description": "Episodic memory entries documenting agent reasoning and progress",
+      "rpc_add": "add_blackboard_entry_with_token",
+      "rpc_get": "get_blackboard_entries_with_token",
+      "entry_types": {
+        "planning": {
+          "description": "Initial task analysis and execution plan",
+          "example": "Breaking down task into 3 steps: 1) Search for existing auth logic, 2) Create new AuthProvider component, 3) Update App.tsx to use provider"
+        },
+        "progress": {
+          "description": "Incremental updates during execution",
+          "example": "Completed step 1: Found 4 files with authentication logic. Proceeding to step 2."
+        },
+        "decision": {
+          "description": "Key decisions made during execution",
+          "example": "Decided to use Context API instead of Redux based on project size and existing patterns"
+        },
+        "reasoning": {
+          "description": "Explanation of why specific approach was chosen",
+          "example": "Choosing to edit existing file rather than create new one to maintain consistency with project structure"
+        },
+        "next_steps": {
+          "description": "What comes next in execution sequence",
+          "example": "Next: Update routing to require authentication for protected routes"
+        },
+        "reflection": {
+          "description": "Looking back at completed work and outcomes",
+          "example": "Successfully implemented authentication. All tests passing. Ready for commit."
+        }
+      },
+      "best_practices": [
+        "Add planning entry at start of task",
+        "Log progress after each major operation",
+        "Document decisions that affect implementation",
+        "Explain reasoning for non-obvious choices",
+        "Update next_steps as task evolves",
+        "Add reflection entry when task complete"
+      ]
+    },
+    
+    "session_context": {
+      "description": "Contextual data attached to agent session",
+      "rpc_add": "add_session_context_with_token",
+      "rpc_get": "get_session_context_with_token",
+      "context_types": {
+        "project_metadata": "Project settings and configuration",
+        "requirements": "Selected requirements for this task",
+        "standards": "Relevant standards to follow",
+        "tech_stack": "Technologies being used",
+        "artifacts": "Reference materials",
+        "canvas": "Architecture diagram data"
+      },
+      "usage": "Store complex context data that agent needs throughout session"
+    }
+  },
+  
+  "project_context_access": {
+    "description": "Agent can access complete ProjectSelector data to inform decisions",
+    
+    "project_metadata": {
+      "rpc_function": "get_project_metadata_with_token",
+      "returns": {
+        "id": "Project UUID",
+        "name": "Project name",
+        "description": "Project description",
+        "organization": "Organization name",
+        "budget": "Project budget",
+        "scope": "Project scope",
+        "priority": "Priority level",
+        "selected_model": "Configured LLM model",
+        "max_tokens": "Token limit",
+        "thinking_enabled": "Extended thinking mode",
+        "github_repo": "GitHub repository",
+        "github_branch": "GitHub branch"
+      },
+      "use_cases": [
+        "Understand project constraints",
+        "Align with project priorities",
+        "Respect token limits"
+      ]
+    },
+    
+    "requirements": {
+      "rpc_function": "search_requirements_with_token",
+      "parameters": {
+        "p_project_id": "Project UUID",
+        "p_search_term": "Keyword search term",
+        "p_token": "Share token"
+      },
+      "returns": {
+        "id": "Requirement UUID",
+        "code": "Hierarchical code (e.g., 'EPIC1.FEAT2.STORY3')",
+        "title": "Requirement title",
+        "content": "Detailed content",
+        "type": "Type (epic, feature, story, acceptance_criteria)",
+        "parent_id": "Parent requirement UUID",
+        "order_index": "Position in tree"
+      },
+      "use_cases": [
+        "Verify implementation meets requirements",
+        "Find related requirements",
+        "Audit code against specifications"
+      ]
+    },
+    
+    "standards": {
+      "rpc_function": "search_standards_with_token",
+      "parameters": {
+        "p_project_id": "Project UUID",
+        "p_search_term": "Keyword search term",
+        "p_token": "Share token"
+      },
+      "returns": {
+        "id": "Standard UUID",
+        "code": "Standard code",
+        "title": "Standard title",
+        "description": "Standard description",
+        "content": "Detailed content",
+        "category_name": "Category name (e.g., 'Cyber Security', 'Accessibility')"
+      },
+      "use_cases": [
+        "Ensure code follows standards",
+        "Find security requirements",
+        "Check accessibility guidelines"
+      ]
+    },
+    
+    "tech_stacks": {
+      "rpc_function": "get_project_tech_stacks_detail_with_token",
+      "parameters": {
+        "p_project_id": "Project UUID",
+        "p_token": "Share token"
+      },
+      "returns": {
+        "id": "Tech stack UUID",
+        "name": "Technology name",
+        "description": "Description",
+        "type": "Type (framework, library, tool, etc.)",
+        "icon": "Icon identifier",
+        "color": "Color code",
+        "metadata": "Additional metadata"
+      },
+      "use_cases": [
+        "Know which technologies to use",
+        "Follow framework patterns",
+        "Use correct libraries"
+      ]
+    },
+    
+    "canvas_summary": {
+      "rpc_function": "get_canvas_summary_with_token",
+      "parameters": {
+        "p_project_id": "Project UUID",
+        "p_token": "Share token"
+      },
+      "returns": {
+        "total_nodes": "Total nodes count",
+        "total_edges": "Total edges count",
+        "node_types": "Summary of node types (PAGE, COMPONENT, API, DATABASE, etc.)",
+        "nodes": "Array of node objects with id, type, label, description",
+        "edges": "Array of edge connections with id, source, target, label"
+      },
+      "use_cases": [
+        "Understand system architecture",
+        "Know what components exist",
+        "See data flow patterns"
+      ]
+    },
+    
+    "artifacts": {
+      "rpc_function": "get_artifacts_with_token",
+      "parameters": {
+        "p_project_id": "Project UUID",
+        "p_token": "Share token",
+        "p_search_term": "Optional keyword search"
+      },
+      "returns": {
+        "id": "Artifact UUID",
+        "ai_title": "AI-generated title",
+        "ai_summary": "AI-generated summary",
+        "content": "Full artifact content",
+        "source_type": "Source type",
+        "created_at": "Creation timestamp"
+      },
+      "use_cases": [
+        "Access reference documentation",
+        "Review design decisions",
+        "Find implementation notes"
+      ]
+    }
+  },
+  
+  "progress_tracking": {
+    "description": "Real-time logging of agent operations for user visibility",
+    
+    "log_operation": {
+      "rpc_function": "log_agent_operation_with_token",
+      "description": "Log each file operation as it occurs",
+      "parameters": {
+        "p_session_id": "Current agent session UUID",
+        "p_operation_type": "Type (search, read, edit, create, delete, rename, batch)",
+        "p_file_path": "File path being operated on",
+        "p_status": "Status (pending, in_progress, completed, failed)",
+        "p_details": "JSONB with operation-specific details",
+        "p_error_message": "Error message if failed",
+        "p_token": "Share token"
+      },
+      "workflow": [
+        "Log 'pending' when starting operation",
+        "Update to 'in_progress' during execution",
+        "Update to 'completed' when done",
+        "Update to 'failed' if error occurs"
+      ],
+      "visibility": "User sees real-time updates in AgentProgressMonitor"
+    },
+    
+    "update_status": {
+      "rpc_function": "update_agent_operation_status_with_token",
+      "description": "Update status of existing operation log",
+      "use_cases": [
+        "Mark operation complete",
+        "Record error details",
+        "Track completion time"
+      ]
+    },
+    
+    "best_practices": [
+      "Log operation before starting",
+      "Include meaningful details (lines modified, file size, etc.)",
+      "Always update to final status (completed/failed)",
+      "Log batch operations as single entry with counts",
+      "Include error messages for debugging"
+    ]
+  },
+  
+  "api_configuration": {
+    "description": "Agent must use project-configured API keys and models",
+    
+    "model_selection": {
+      "source": "project.selected_model field",
+      "options": [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro", 
+        "claude-sonnet-4-5",
+        "claude-opus-4-1-20250805",
+        "grok-beta"
+      ],
+      "api_keys": {
+        "gemini": "GEMINI_API_KEY environment variable",
+        "claude": "ANTHROPIC_API_KEY environment variable",
+        "grok": "XAI_API_KEY environment variable"
+      },
+      "critical": "NEVER use hardcoded API keys or models. Always read from project settings and select appropriate key based on selectedModel field."
+    },
+    
+    "token_limits": {
+      "source": "project.max_tokens field",
+      "description": "Maximum context window size",
+      "usage": "Respect this limit when building prompts with context"
+    },
+    
+    "thinking_mode": {
+      "source": "project.thinking_enabled and project.thinking_budget fields",
+      "description": "Extended reasoning mode for complex tasks",
+      "when_to_use": [
+        "Complex multi-file refactoring",
+        "Architecture decisions",
+        "Debugging difficult issues"
+      ]
+    },
+    
+    "error_handling": {
+      "402_payment_required": "User needs to add credits to their API account",
+      "429_rate_limit": "Too many requests, need to slow down",
+      "action": "Surface these errors clearly to user via progress tracking"
+    }
+  },
+  
+  "task_patterns": {
+    "review_file": {
+      "description": "Analyze file and provide feedback without changes",
+      "steps": [
+        "Read file content",
+        "Access related requirements/standards",
+        "Analyze code quality, patterns, issues",
+        "Log findings to blackboard",
+        "Do NOT stage any changes"
+      ]
+    },
+    
+    "edit_file": {
+      "description": "Make specific modifications to file",
+      "steps": [
+        "Read current file content",
+        "Understand context and requirements",
+        "Determine exact changes needed",
+        "Use edit_lines or replace_file appropriately",
+        "Log operation for progress tracking",
+        "Document changes in blackboard"
+      ]
+    },
+    
+    "audit_file": {
+      "description": "Compare file against requirements",
+      "steps": [
+        "Read file content",
+        "Fetch relevant requirements via search_requirements_with_token",
+        "Compare implementation to specifications",
+        "Identify gaps or violations",
+        "Log audit findings to blackboard",
+        "Optionally suggest fixes"
+      ]
+    },
+    
+    "create_feature": {
+      "description": "Implement new feature across multiple files",
+      "steps": [
+        "Break down requirements into files needed",
+        "Log plan to blackboard",
+        "Search for related existing code",
+        "Create new files as needed",
+        "Edit existing files for integration",
+        "Log progress for each file",
+        "Reflection entry when complete"
+      ]
+    },
+    
+    "refactor": {
+      "description": "Restructure code without changing functionality",
+      "steps": [
+        "Analyze current structure",
+        "Plan refactoring approach (blackboard)",
+        "Batch read related files",
+        "Stage changes using batch_stage for efficiency",
+        "Log all operations",
+        "Verify no functionality changed"
+      ]
+    }
+  },
+  
+  "activation_strings": {
+    "description": "Keywords that trigger specific agent modes",
+    "patterns": {
+      "review": ["review", "analyze", "check", "inspect"],
+      "edit": ["edit", "modify", "update", "change", "fix"],
+      "create": ["create", "add", "implement", "build"],
+      "delete": ["delete", "remove", "clean"],
+      "audit": ["audit", "compare", "verify", "validate"],
+      "refactor": ["refactor", "restructure", "reorganize"]
+    },
+    "context_attachment": {
+      "description": "When files are attached to prompt, they should be included in context",
+      "usage": "Read attached files first, then proceed with task"
+    }
+  },
+  
+  "guidelines": {
+    "critical_rules": [
+      "NEVER use replace_file unless the file is <150 lines OR it's a config file (package.json, tsconfig.json, etc.)",
+      "ALWAYS prefer edit_lines over full file replacement - it preserves git blame and produces cleaner diffs",
+      "ALWAYS call list_files or wildcard_search at the start of every task if no files are attached",
+      "NEVER assume file paths exist - always verify with list_files or search first",
+      "ALWAYS include a blackboard planning entry BEFORE making any file changes",
+      "If task involves multiple files, list them explicitly in your planning blackboard entry",
+      "Before setting status='completed', call get_staged_changes to verify what you've modified",
+      "After each edit_lines operation, verify the result using the verification object in the response",
+      "Use get_staged_changes to see what you've already staged before making duplicate edits",
+      "Only use discard_all_staged when user EXPLICITLY requests a full reset - this is destructive",
+      "BATCH multiple edit_lines operations in a single response - include up to 10 edits per response",
+      "Don't wait for separate iterations when you have multiple edits - submit them together",
+      "Keep each edit_lines targeted and precise, but submit multiple operations at once for efficiency"
+    ],
+    
+    "code_quality": [
+      "Follow existing code style and patterns",
+      "Use TypeScript types properly",
+      "Add comments for complex logic",
+      "Keep functions small and focused",
+      "Follow DRY principle"
+    ],
+    
+    "file_organization": [
+      "Respect existing directory structure",
+      "Place new files in appropriate locations",
+      "Follow naming conventions",
+      "Organize imports consistently"
+    ],
+    
+    "testing": [
+      "Create test files when implementing new features",
+      "Follow existing test patterns",
+      "Test edge cases",
+      "Mock external dependencies"
+    ],
+    
+    "documentation": [
+      "Update README when adding features",
+      "Document complex algorithms",
+      "Add JSDoc comments for public APIs",
+      "Keep comments up to date"
+    ],
+    
+    "security": [
+      "Never expose API keys or secrets",
+      "Validate user inputs",
+      "Follow security standards from standards library",
+      "Use secure coding practices"
+    ]
+  },
+  
+  "version": "1.0.0",
+  "last_updated": "2025-12-01"
+}
