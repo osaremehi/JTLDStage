@@ -940,7 +940,7 @@ export default function Landing() {
               </Link>
             </nav>
             <div className="text-sm public-text-muted text-center md:text-right">
-              <p>© 2025 JTLDstage. <Link to="/license" className="public-brand underline decoration-1 underline-offset-2 hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--public-brand)]">MIT License</Link> Open Source by the Government of Alberta.</p>
+              <p>© 2025 JTLDstage. <Link to="/license" className="public-brand underline decoration-1 underline-offset-2 hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--public-brand)]">MIT License</Link> Open Source by JTLD Consulting.</p>
               <a href="https://jtldstage.red" target="_blank" rel="noopener noreferrer" className="public-brand underline decoration-1 underline-offset-2 hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--public-brand)]">
                 jtldstage.red
               </a>

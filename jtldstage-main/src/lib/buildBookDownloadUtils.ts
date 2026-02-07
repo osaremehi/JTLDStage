@@ -1,6 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 
-const DISCLAIMER = `DISCLAIMER: This information is provided for Reference Purposes Only by the Government of Alberta to support in the development of technologies. The Government of Alberta bears no liability for its use or misuse, and this publication does not constitute an endorsement of the vendors, organizations, or technologies represented herein.`;
+const DISCLAIMER = `DISCLAIMER: This information is provided for Reference Purposes Only by JTLD Consulting to support in the development of technologies. JTLD Consulting bears no liability for its use or misuse, and this publication does not constitute an endorsement of the vendors, organizations, or technologies represented herein.`;
 
 export interface ResourceInfo {
   name: string;

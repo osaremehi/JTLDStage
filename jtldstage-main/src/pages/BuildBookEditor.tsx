@@ -376,7 +376,7 @@ export default function BuildBookEditor() {
                     id="name"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="e.g., Government of Alberta Standards"
+                    placeholder="e.g., JTLD Consulting Standards"
                   />
                 </div>
 

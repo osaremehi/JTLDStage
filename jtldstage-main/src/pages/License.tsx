@@ -43,7 +43,7 @@ const License = () => {
         <div className="prose max-w-none space-y-6">
           <div className="public-card rounded-lg p-6 font-mono text-sm leading-relaxed">
             <p className="mb-4 font-semibold public-heading">MIT License</p>
-            <p className="mb-4 public-text-muted">Copyright (c) 2025 Government of Alberta</p>
+            <p className="mb-4 public-text-muted">Copyright (c) 2025 JTLD Consulting</p>
             <p className="mb-4 public-text-muted">
               Permission is hereby granted, free of charge, to any person obtaining a copy
               of this software and associated documentation files (the "Software"), to deal
@@ -87,7 +87,7 @@ const License = () => {
           <section className="mt-8">
             <h2 className="text-2xl font-semibold mb-4 public-heading">Open Source</h2>
             <p className="public-text-muted leading-relaxed">
-              JTLDstage is developed by the Government of Alberta as an open-source project.
+              JTLDstage is developed by JTLD Consulting as an open-source project.
               We believe in transparency, collaboration, and sharing tools that can benefit
               the broader community.
             </p>
@@ -98,10 +98,10 @@ const License = () => {
             <p className="public-text-muted leading-relaxed">
             For questions about the license or the project, please contact:{" "}
               <a
-                href="mailto:ti.jtldstage@gov.ab.ca"
+                href="mailto:support@jtldstage.com"
                 className="public-link underline decoration-1 underline-offset-2 hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--public-brand)]"
               >
-                ti.jtldstage@gov.ab.ca
+                support@jtldstage.com
               </a>
             </p>
           </section>
@@ -120,7 +120,7 @@ const License = () => {
             <Link to="/privacy" className="hover:text-[var(--public-brand)] underline decoration-1 underline-offset-2 transition-colors">Privacy Policy</Link>
             <Link to="/license" className="hover:text-[var(--public-brand)] underline decoration-1 underline-offset-2 transition-colors">License</Link>
           </nav>
-          <p className="text-sm public-text-muted">© 2025 Government of Alberta</p>
+          <p className="text-sm public-text-muted">© 2025 JTLD Consulting</p>
         </div>
       </footer>
     </div>

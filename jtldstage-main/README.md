@@ -34,7 +34,7 @@ A standards-first, agentic AI platform that transforms unstructured requirements
 
 ## Overview
 
-JTLDstage is an open-source AI-powered software development platform created by the **Government of Alberta, Ministry of Technology and Innovation**. It enables teams to:
+JTLDstage is an open-source AI-powered software development platform created by **JTLD Consulting**. It enables teams to:
 
 - **Design** → Transform ideas into structured requirements with AI decomposition
 - **Build** → Generate production code with autonomous AI coding agents
@@ -1201,11 +1201,11 @@ The package includes:
 
 ### Alpha Notice
 
-This application is currently in Alpha testing by the **Government of Alberta**. Features, functionality, and availability are subject to change or may be removed at any time during the testing period.
+This application is currently in Alpha testing by **JTLD Consulting**. Features, functionality, and availability are subject to change or may be removed at any time during the testing period.
 
 ### Liability Waiver
 
-By using this application, you acknowledge that it is provided "as is" without any warranties, express or implied. The Government of Alberta assumes no liability for any issues, data loss, or damages that may result from using this application during the testing period.
+By using this application, you acknowledge that it is provided "as is" without any warranties, express or implied. JTLD Consulting assumes no liability for any issues, data loss, or damages that may result from using this application during the testing period.
 
 ### License
 
@@ -1215,8 +1215,7 @@ MIT License - See [LICENSE](./LICENSE) for details.
 
 ## Contact
 
-**Government of Alberta**  
-Ministry of Technology and Innovation
+**JTLD Consulting**
 
 - **Website**: [https://jtldstage.red](https://jtldstage.red)
 - **Repository**: [GitHub](https://github.com/jtldstage-red/jtldstage)

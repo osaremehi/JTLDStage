@@ -48,7 +48,7 @@ export default function Privacy() {
 
           <h2 className="public-heading">Our Commitment</h2>
           <p>
-            The Government of Alberta, Ministry of Technology and Innovation is committed to ensuring your privacy while 
+            JTLD Consulting is committed to ensuring your privacy while
             you use the JTLDstage platform.
           </p>
 
@@ -70,32 +70,27 @@ export default function Privacy() {
             with the service. For example, when creating an account, you will be asked to provide your name and email address.
           </p>
           <p>
-            In accordance with Section 5(2) of the Protection of Privacy Act (POPA), we provide the following notice for 
-            the collection of your personal information:
+            We provide the following notice for the collection of your personal information:
           </p>
           <ul>
             <li>
-              <strong>(a) Purpose:</strong> The personal information is collected to process and respond to your requests 
+              <strong>(a) Purpose:</strong> The personal information is collected to process and respond to your requests
               related to the service, including account creation and management.
             </li>
             <li>
-              <strong>(b) Legal Authority:</strong> This collection is authorized under Section 4(c) of POPA, as the 
-              information relates directly to and is necessary for an operating program or activity of the Government of Alberta.
-            </li>
-            <li>
-              <strong>(c) Contact Information:</strong> If you have questions about the collection of your personal 
+              <strong>(b) Contact Information:</strong> If you have questions about the collection of your personal
               information, please contact us at{" "}
-              <a href="mailto:ti.jtldstage@gov.ab.ca" className="public-link">ti.jtldstage@gov.ab.ca</a>.
+              <a href="mailto:support@jtldstage.com" className="public-link">support@jtldstage.com</a>.
             </li>
             <li>
-              <strong>(d) Automated System Use:</strong> The personal information, along with any content you create 
-              (such as prompts or project data), will be input into an automated system to generate content or provide 
+              <strong>(c) Automated System Use:</strong> The personal information, along with any content you create
+              (such as prompts or project data), will be input into an automated system to generate content or provide
               AI-assisted development capabilities.
             </li>
           </ul>
           <p>
-            This personal information is disclosed only to authorized personnel who use it for the specified purposes. 
-            While the personal information you send is secure once it reaches the government server, it may not be secure 
+            This personal information is disclosed only to authorized personnel who use it for the specified purposes.
+            While the personal information you send is secure once it reaches our server, it may not be secure
             in transit between your computer and ours.
           </p>
 
@@ -109,9 +104,9 @@ export default function Privacy() {
             about to deposit cookies on your hard drive.
           </p>
           <p>
-            Government of Alberta websites use cookies to collect anonymous statistical information such as browser type, 
-            screen size, traffic patterns and pages visited. This information helps us provide you with better service. 
-            We do not store personal information in cookies, nor do we collect personal information from you without your 
+            JTLDstage uses cookies to collect anonymous statistical information such as browser type,
+            screen size, traffic patterns and pages visited. This information helps us provide you with better service.
+            We do not store personal information in cookies, nor do we collect personal information from you without your
             knowledge, as you browse the site.
           </p>
 
@@ -150,41 +145,33 @@ export default function Privacy() {
 
           <h2 className="public-heading">Security</h2>
           <p>
-            The Government of Alberta's computer system uses software to monitor unauthorized attempts to upload or change 
-            information, or damage the service we provide. No attempt is made to identify users or their usage patterns 
+            Our systems use software to monitor unauthorized attempts to upload or change
+            information, or damage the service we provide. No attempt is made to identify users or their usage patterns
             except during law enforcement investigations.
           </p>
 
           <h2 className="public-heading">Data Retention and Deletion</h2>
           <p>
-            In accordance with Section 6(b) of the Protection of Privacy Act (POPA), we will retain your personal 
-            information for the minimum period necessary to fulfill the purposes outlined in this Privacy Statement, and 
-            in compliance with the Government of Alberta's established Records Retention and Disposition Schedule. This 
-            schedule ensures that personal information is retained and used only to the extent required to meet our legal 
-            obligations under POPA and other applicable Alberta laws, after which it will be securely disposed of.
+            We will retain your personal information for the minimum period necessary to fulfill the purposes outlined
+            in this Privacy Statement. Personal information is retained and used only to the extent required to meet our
+            legal obligations under applicable laws, after which it will be securely disposed of.
           </p>
           <p>
             You may request the deletion of your account and associated data by contacting us at{" "}
-            <a href="mailto:ti.jtldstage@gov.ab.ca" className="public-link">ti.jtldstage@gov.ab.ca</a>. We will evaluate such requests in alignment with
-            POPA requirements and the Records Retention and Disposition Schedule, taking reasonable steps to delete your
-            personal information from our records where permissible, except where retention is required for legal purposes 
-            under Alberta law.
+            <a href="mailto:support@jtldstage.com" className="public-link">support@jtldstage.com</a>. We will take reasonable steps to delete your
+            personal information from our records where permissible, except where retention is required for legal purposes.
           </p>
 
           <h2 className="public-heading">Your Rights</h2>
           <h3 className="public-heading">Correction of Personal Information</h3>
           <p>
-            The Protection of Privacy Act provides the right to request correction of your personal information. Please 
-            contact us at <a href="mailto:ti.jtldstage@gov.ab.ca" className="public-link">ti.jtldstage@gov.ab.ca</a> and we will redirect your request
-            to the office authorized to receive such a request.
+            You have the right to request correction of your personal information. Please
+            contact us at <a href="mailto:support@jtldstage.com" className="public-link">support@jtldstage.com</a> and we will process your request.
           </p>
           <h3 className="public-heading">Access to Information</h3>
           <p>
-            The Access to Information Act provides the right of access to information, including your own personal 
-            information. The ATI request form is available through the{" "}
-            <a href="https://www.alberta.ca/eservices.aspx" target="_blank" rel="noopener noreferrer" className="public-link">
-              eServices page
-            </a>.
+            You have the right to access your personal information held by us. Please contact us
+            at <a href="mailto:support@jtldstage.com" className="public-link">support@jtldstage.com</a> to submit an access request.
           </p>
 
           <h2 className="public-heading">Contact Information</h2>
@@ -194,10 +181,10 @@ export default function Privacy() {
           </p>
           <p>
             <strong>Email:</strong>{" "}
-            <a href="mailto:ti.jtldstage@gov.ab.ca" className="public-link">ti.jtldstage@gov.ab.ca</a>
+            <a href="mailto:support@jtldstage.com" className="public-link">support@jtldstage.com</a>
           </p>
           <p>
-            <strong>Organization:</strong> Government of Alberta, Ministry of Technology and Innovation
+            <strong>Organization:</strong> JTLD Consulting
           </p>
         </div>
       </main>
@@ -214,7 +201,7 @@ export default function Privacy() {
             <Link to="/privacy" className="hover:text-[var(--public-brand)] underline decoration-1 underline-offset-2 transition-colors">Privacy Policy</Link>
             <Link to="/license" className="hover:text-[var(--public-brand)] underline decoration-1 underline-offset-2 transition-colors">License</Link>
           </nav>
-          <p className="text-sm public-text-muted">© 2025 Government of Alberta</p>
+          <p className="text-sm public-text-muted">© 2025 JTLD Consulting</p>
         </div>
       </footer>
     </div>

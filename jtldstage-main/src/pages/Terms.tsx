@@ -64,8 +64,8 @@ export default function Terms() {
                 <h2 className="text-xl font-semibold public-alert-amber-heading mb-3">Alpha Testing Notice</h2>
                 <div className="space-y-3">
                   <p>
-                    <strong>The Government of Alberta is currently testing this application.</strong> JTLDstage is in active 
-                    development and is being evaluated for potential use in government operations.
+                    <strong>JTLD Consulting is currently testing this application.</strong> JTLDstage is in active
+                    development and is being evaluated for potential use in operations.
                   </p>
                   <p>
                     <strong>Features are subject to change without notice.</strong> Functionality may be added, modified, 
@@ -79,7 +79,7 @@ export default function Terms() {
                   <p className="text-sm public-alert-amber-highlight p-4 rounded-lg">
                     THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
                     EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR 
-                    PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE GOVERNMENT OF ALBERTA, ITS MINISTERS, OFFICERS, EMPLOYEES, 
+                    PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL JTLD CONSULTING, ITS OFFICERS, EMPLOYEES,
                     OR AGENTS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
                     OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
                   </p>
@@ -96,7 +96,7 @@ export default function Terms() {
 
           <h2 className="public-heading">Purpose and AI Capabilities</h2>
           <p>
-            This site is provided for software development and project management purposes. The Government of Alberta makes 
+            This site is provided for software development and project management purposes. JTLD Consulting makes
             available certain AI capabilities, but does not guarantee the accuracy of AI-generated statements or outputs. 
             All AI-generated content should be reviewed and verified independently before use.
           </p>
@@ -121,7 +121,7 @@ export default function Terms() {
 
           <h2 className="public-heading">Service Availability</h2>
           <p>
-            We do not guarantee continuous access to this system. At any future point, Alberta may remove parts or all of 
+            We do not guarantee continuous access to this system. At any future point, JTLD Consulting may remove parts or all of
             this service due to operational needs, budget constraints, or other factors beyond our control.
           </p>
           <p>
@@ -164,13 +164,13 @@ export default function Terms() {
           <h2 className="public-heading">Intellectual Property</h2>
           <h3 className="public-heading">Platform Content</h3>
           <p>
-            The content, features, and functionality of the JTLDstage platform are owned by the Government of Alberta and
+            The content, features, and functionality of the JTLDstage platform are owned by JTLD Consulting and
             are protected by copyright, trademark, and other intellectual property laws. You may not reproduce, distribute, 
             or create derivative works without explicit permission.
           </p>
           <h3 className="public-heading">User-Generated Content</h3>
           <p>
-            You retain ownership of content you create using the platform, but grant the Government of Alberta a non-exclusive license to 
+            You retain ownership of content you create using the platform, but grant JTLD Consulting a non-exclusive license to 
             use, modify, and display such content for operational purposes. You are responsible for ensuring your content 
             does not infringe on others' intellectual property rights.
           </p>
@@ -196,7 +196,7 @@ export default function Terms() {
           </p>
           <h3 className="public-heading">Limitation of Liability</h3>
           <p>
-            To the maximum extent permitted by law, the Government of Alberta shall not be liable for any 
+            To the maximum extent permitted by law, JTLD Consulting shall not be liable for any 
             indirect, incidental, special, consequential, or punitive damages arising from your use of the service, even 
             if we have been advised of the possibility of such damages.
           </p>
@@ -214,7 +214,7 @@ export default function Terms() {
 
           <h2 className="public-heading">Modifications to Terms</h2>
           <p>
-            These terms of service are subject to change by Alberta at our discretion. We will notify users of significant 
+            These terms of service are subject to change by JTLD Consulting at our discretion. We will notify users of significant 
             changes through the platform or via email when possible.
           </p>
           <p>
@@ -224,9 +224,8 @@ export default function Terms() {
 
           <h2 className="public-heading">Governing Law and Jurisdiction</h2>
           <p>
-            These Terms of Use are governed by and construed in accordance with the laws of the Province of Alberta and 
-            the laws of Canada applicable therein. Any disputes arising from these terms or your use of the service shall 
-            be subject to the exclusive jurisdiction of the courts of Alberta.
+            These Terms of Use are governed by and construed in accordance with applicable laws. Any disputes arising
+            from these terms or your use of the service shall be subject to the exclusive jurisdiction of the applicable courts.
           </p>
 
           <h2 className="public-heading">Questions About These Terms?</h2>
@@ -235,10 +234,10 @@ export default function Terms() {
           </p>
           <p>
             <strong>Email:</strong>{" "}
-            <a href="mailto:ti.jtldstage@gov.ab.ca" className="public-link">ti.jtldstage@gov.ab.ca</a>
+            <a href="mailto:support@jtldstage.com" className="public-link">support@jtldstage.com</a>
           </p>
           <p>
-            <strong>Organization:</strong> Government of Alberta, Ministry of Technology and Innovation
+            <strong>Organization:</strong> JTLD Consulting
           </p>
         </div>
       </main>
@@ -255,7 +254,7 @@ export default function Terms() {
             <Link to="/privacy" className="hover:text-[var(--public-brand)] underline decoration-1 underline-offset-2 transition-colors">Privacy Policy</Link>
             <Link to="/license" className="hover:text-[var(--public-brand)] underline decoration-1 underline-offset-2 transition-colors">License</Link>
           </nav>
-          <p className="text-sm public-text-muted">© 2025 Government of Alberta</p>
+          <p className="text-sm public-text-muted">© 2025 JTLD Consulting</p>
         </div>
       </footer>
     </div>

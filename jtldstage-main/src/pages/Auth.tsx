@@ -317,7 +317,7 @@ export default function Auth() {
       <AlertDescription className="text-sm">
         <ul className="mt-1 space-y-1 text-muted-foreground">
           <li><span className="font-medium text-foreground">Email/Password:</span> Public access</li>
-          <li><span className="font-medium text-foreground">Google SSO:</span> Government of Alberta</li>
+          <li><span className="font-medium text-foreground">Google SSO:</span> JTLD Consulting</li>
           <li><span className="font-medium text-foreground">Microsoft SSO:</span> Organizations with Entra ID</li>
         </ul>
       </AlertDescription>
